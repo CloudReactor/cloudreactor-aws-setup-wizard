@@ -1,0 +1,8 @@
+FROM cloudreactor-aws-setup-wizard
+
+COPY ./dev-requirements.txt .
+
+RUN pip install --no-cache-dir -r dev-requirements.txt
+
+ENTRYPOINT ["flake8", "--config", "src/.flake8", "src"]
+

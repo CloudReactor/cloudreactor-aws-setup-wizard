@@ -1,0 +1,14 @@
+.idea/
+
+__pycache__/
+__pycache__
+*.py[cod]
+
+.mypy_cache
+
+.DS_Store
+
+# Editor files
+.vscode/
+
+saved_settings.json

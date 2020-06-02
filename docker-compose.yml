@@ -1,0 +1,62 @@
+version: "3.7"
+
+x-service-base: &service-base
+  image: cloudreactor-aws-setup-wizard
+  build:
+    context: ./
+  volumes:
+    - .:/usr/app
+
+x-dev-base: &dev-base
+  <<: *service-base
+  image:  cloudreactor-aws-setup-wizard_dev
+  build:
+    context: ./
+    dockerfile: Dockerfile-dev
+
+x-pip-compile-base: &pip-compile-base
+  image: cloudreactor-aws-setup-wizard_pip-tools
+  build:
+    context: ./
+    dockerfile: tools/pip-tools/Dockerfile
+  volumes:
+    - ./:/work
+
+services:
+  make_template:
+    <<: *service-base
+
+  wizard:
+    <<: *service-base
+    entrypoint: python src/wizard.py
+    environment:
+      - AWS_PROFILE=${AWS_PROFILE}
+    volumes:
+      - .:/usr/app
+      #- ~/.aws/:/root/.aws:ro
+
+  shell:
+    <<: *service-base
+    command: bash
+
+  flake8:
+    <<: *dev-base
+
+  mypy:
+    <<: *dev-base
+    entrypoint: ["mypy", "src"]
+
+  safety:
+    <<: *dev-base
+    entrypoint: ["safety", "check"]
+
+  dev-shell:
+    <<: *dev-base
+    command: bash
+
+  pip-compile:
+    <<: *pip-compile-base
+
+  pip-compile-dev:
+    <<: *pip-compile-base
+    command: dev-requirements.in --output-file dev-requirements.txt
