@@ -6,6 +6,8 @@ x-service-base: &service-base
     context: ./
   volumes:
     - .:/usr/app
+  env_file:
+    - .env
 
 x-dev-base: &dev-base
   <<: *service-base
@@ -29,8 +31,8 @@ services:
   wizard:
     <<: *service-base
     entrypoint: python src/wizard.py
-    environment:
-      - AWS_PROFILE=${AWS_PROFILE}
+    #environment:
+      #- AWS_PROFILE=${AWS_PROFILE}
     volumes:
       - .:/usr/app
       #- ~/.aws/:/root/.aws:ro

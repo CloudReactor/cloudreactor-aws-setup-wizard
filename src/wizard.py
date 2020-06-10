@@ -1,15 +1,19 @@
 import argparse
+import json
 import os
-import jsonpickle
 import logging
+import jsonpickle
+import urllib3
 
 import boto3
 from botocore.exceptions import ClientError
 
 import questionary
 
+DEFAULT_LOG_LEVEL = 'ERROR'
 SAVED_STATE_FILENAME = 'saved_settings.json'
 DEFAULT_PREFIX = ' (Default)'
+CLOUDREACTOR_API_BASE_URL = os.environ.get('CLOUDREACTOR_API_BASE_URL', 'https://api.cloudreactor.io')
 
 AWS_REGIONS = [
     "us-east-1",
@@ -50,21 +54,23 @@ class Wizard(object):
     NUMBER_TO_PROPERTY = {
         '1': ['api_key', 'CloudReactor API key'],
         '2': ['run_environment_name', 'CloudReactor Run Environment'],
-        '3': ['cluster_name', 'AWS ECS Cluster'],
-        '4': ['aws_access_key', 'AWS access key'],
-        '5': ['aws_secret_key', 'AWS secret key'],
-        '6': ['aws_region', 'AWS region'],
+        '3': ['aws_access_key', 'AWS access key'],
+        '4': ['aws_secret_key', 'AWS secret key'],
+        '5': ['aws_region', 'AWS region'],
+        '6': ['cluster_name', 'AWS ECS Cluster'],
         '7': ['stack_name', 'CloudFormation stack name']
     }
 
-    def __init__(self, deployment: str):
+    def __init__(self, deployment: str, cloudreactor_api_base_url: str):
         self.deployment_environment = deployment
+        self.cloudreactor_api_base_url = self.cloudreactor_api_base_url
         self.run_environment_name = None
         self.api_key = None
+        self.existing_run_environments = None
         self.aws_access_key = None
         self.aws_secret_key = None
         self.aws_region = None
-        self.aws_secret_key = None
+        self.aws_account_id = None
         self.cluster_name = None
         self.stack_name = None
         self.mode = Wizard.MODE_INTERVIEW
@@ -141,7 +147,7 @@ class Wizard(object):
 
         if p == 'api_key':
             self.ask_for_api_key()
-        if p == 'run_environment_name':
+        elif p == 'run_environment_name':
             self.ask_for_run_environment_name()
         elif p == 'aws_access_key':
             self.ask_for_aws_access_key()
@@ -154,7 +160,7 @@ class Wizard(object):
         elif p == 'stack_name':
             self.ask_for_stack_name()
         else:
-            print(f"{n} is not a valid choice. Please try another choice.")
+            print(f"{n} is not a valid choice. Please try another choice. [{p}]")
 
     def ask_for_api_key(self):
         q = "What is your CloudReactor API key?"
@@ -164,14 +170,61 @@ class Wizard(object):
 
         self.api_key = questionary.text(q).ask() or self.api_key
 
-        # TODO: Validate
-
-        if self.api_key:
-            print(f"Using CloudReactor API key '{self.api_key}'.")
-        else:
+        if not self.api_key:
             print("Skipping CloudReactor API key for now.")
+            self.existing_run_environments = None
+            self.save()
+            return
 
-        self.save()
+        print()
+
+        response_ok = False
+        response_status = None
+        response_body = None
+
+        try:
+            http = urllib3.PoolManager()
+            r = http.request('GET', CLOUDREACTOR_API_BASE_URL + '/api/v1/run_environments/',
+                             headers={
+                                 'Authorization': f"Token {self.api_key}",
+                                 'Accept': 'application/json'
+                             }, timeout=10.0)
+            #r = http.request('GET', 'http://httpbin.org/ip')
+
+            response_status = r.status;
+
+            response_body = r.data.decode('utf-8')
+            page = json.loads(response_body)
+
+            response_ok = response_status == 200
+        except urllib3.exceptions.HTTPError as http_error:
+            print(f"An error communicating with cloudreactor.io occurred: {http_error}")
+
+        if response_ok:
+            self.existing_run_environments = page['results']
+
+            if len(self.existing_run_environments) == 0:
+                print('No current Run Environments found. Please create a new one.')
+            else:
+                print(f"There are currently {page['count']} Run Environments in your organization:")
+
+                for run_environment in self.existing_run_environments:
+                    print(run_environment['name'])
+
+            print('Your CloudReactor API key is valid.')
+
+            self.save()
+        else:
+            print(f"The CloudReactor API key '{self.api_key}' is not valid. Please check that it is correct.")
+
+            if response_body:
+                print(f"Got response status {response_status} and response body: {response_body} from the server")
+            else:
+                print(f"Got response status {response_status} from the server")
+
+            self.api_key = None
+
+        print()
 
     def ask_for_run_environment_name(self):
         q = 'What do you want to name your Run Environment? Common names are "staging" or "production".'
@@ -208,13 +261,21 @@ class Wizard(object):
 
     def ask_for_aws_access_key(self):
         q = 'What AWS access key do you want to use. Type "none" to use the default permissions on this machine.'
+
+        if self.aws_access_key:
+            q += f" [{self.aws_access_key}]"
+
         self.aws_access_key = questionary.text(q).ask() or self.aws_access_key
-        self.save()
+        self.validate_aws_access()
 
     def ask_for_aws_secret_key(self):
         q = 'What AWS secret key do you want to use. Type "none" to use the default permissions on this machine.'
+
+        if self.aws_secret_key:
+            q += f" [{self.aws_secret_key}]"
+
         self.aws_secret_key = questionary.text(q).ask() or self.aws_secret_key
-        self.save()
+        self.validate_aws_access()
 
     def ask_for_aws_region(self):
         default_aws_region = self.aws_region or os.environ.get('AWS_REGION') or \
@@ -250,18 +311,63 @@ class Wizard(object):
         with open(SAVED_STATE_FILENAME, 'w') as f:
             f.write(jsonpickle.encode(self))
 
+    def validate_aws_access(self):
+        sts = None
+        try:
+            sts = self.make_boto_client('sts')
+        except Exception as ex:
+            logging.warning("Failed to validate AWS credentials", exc_info=True)
+            print("The AWS access key / secret key pair was not valid. Please check them and try again.\n")
+
+        if sts is None:
+            self.aws_account_id = None
+            self.save()
+            return
+
+        try:
+            caller_id = sts.get_caller_identity()
+            self.aws_account_id = caller_id['Account']
+            print(f"Your AWS credentials for AWS account {self.aws_account_id} are valid.")
+        except Exception as ex:
+            logging.warning("Failed to get caller identity from AWS", exc_info=True)
+            print("Failed to fetch your AWS user info. Please check your AWS credentials and try again.\n")
+            self.aws_account_id = None
+
+        self.save()
+
+    def make_boto_client(self, service_name: str):
+        if self.aws_access_key and self.aws_secret_key:
+           return boto3.client(service_name,
+                               aws_access_key_id=self.aws_access_key,
+                               aws_secret_access_key=self.aws_secret_key)
+
+        # TODO: use default credentials
+        return None
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--environment',
                         help='CloudReactor deployment environment')
+    parser.add_argument('--log-level',
+                        help=f"Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL). Defaults to {DEFAULT_LOG_LEVEL}.")
 
     args = parser.parse_args()
 
     deployment_environment = args.environment
 
+    log_level = (args.log_level or os.environ.get('WIZARD_LOG_LEVEL', DEFAULT_LOG_LEVEL)).upper()
+    numeric_log_level = getattr(logging, log_level, None)
+    if not isinstance(numeric_log_level, int):
+        logging.warning(f"Invalid log level: {log_level}, defaulting to {DEFAULT_LOG_LEVEL}")
+        numeric_log_level = getattr(logging, DEFAULT_LOG_LEVEL, None)
+
+    logging.basicConfig(level=numeric_log_level,
+                        format=f"%(levelname)s: %(message)s")
     print_banner()
+
+    logging.debug(f"CloudReactor Base URL = '{CLOUDREACTOR_API_BASE_URL}'")
 
     bucket_suffix = ''
     file_suffix = ''
@@ -283,6 +389,7 @@ if __name__ == '__main__':
         print("No save state found, starting a new saved_settings.json.")
 
     if wizard is None:
-        wizard = Wizard(deployment=deployment_environment)
+        wizard = Wizard(deployment=deployment_environment,
+                        cloudreactor_api_base_url=cloudreactor_api_base_url)
 
     wizard.run()
