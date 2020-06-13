@@ -7,13 +7,11 @@ import random
 import re
 import string
 import time
+import urllib.parse
 
 import jsonpickle
 import urllib3
-
 import boto3
-from botocore.exceptions import ClientError
-
 import questionary
 
 DEFAULT_LOG_LEVEL = 'ERROR'
@@ -36,6 +34,7 @@ CLOUDFORMATION_SUCCESSFUL_STATUSES = set([
 ])
 
 CLOUDREACTOR_API_BASE_URL = os.environ.get('CLOUDREACTOR_API_BASE_URL', 'https://api.cloudreactor.io')
+HELP_MESSAGE = 'Please contact support@cloudreactor.io for help.'
 
 AWS_REGIONS = [
     "us-east-1",
@@ -104,6 +103,9 @@ class Wizard(object):
         self.stack_upload_started_at = None
         self.stack_upload_succeeded = None
         self.stack_upload_finished_at = None
+        self.stack_upload_status = None
+        self.stack_upload_status_reason = None
+        self.saved_run_environment_uuid = None
 
         self.mode = Wizard.MODE_INTERVIEW
 
@@ -123,26 +125,34 @@ class Wizard(object):
     def run(self):
         finished = False
         while not finished:
-            if self.uploaded_stack_id:
-                self.wait_for_stack_upload()
+            rv = None
+            if self.saved_run_environment_uuid:
+                rv = self.handle_run_environment_saved()
+            elif self.stack_upload_finished_at:
+                rv = self.handle_stack_upload_finished()
+            elif self.uploaded_stack_id:
+                rv = self.wait_for_stack_upload()
 
-            self.print_menu()
+            if rv is None:
+                self.print_menu()
 
-            if self.mode == Wizard.MODE_INTERVIEW:
-                rv = questionary.confirm("Continue step-by-step interview? (n switches to editing settings)").ask()
-                if not rv:
-                    self.mode = Wizard.MODE_EDIT
-                    self.save()
+                if self.mode == Wizard.MODE_INTERVIEW:
+                    rv = questionary.confirm("Continue step-by-step interview? (n switches to editing settings)").ask()
+                    if not rv:
+                        self.mode = Wizard.MODE_EDIT
+                        self.save()
 
-            proceed = True
+                proceed = True
 
-            while proceed:
-                if wizard.mode == Wizard.MODE_INTERVIEW:
-                    proceed = self.interview()
-                else:
-                    proceed = self.edit()
+                while proceed:
+                    if wizard.mode == Wizard.MODE_INTERVIEW:
+                        proceed = self.interview()
 
-
+                        if proceed is None:
+                            wizard.mode = Wizard.MODE_EDIT
+                            self.save()
+                    else:
+                        proceed = self.edit()
 
     def interview(self):
         property_count = len(Wizard.NUMBER_TO_PROPERTY)
@@ -151,10 +161,13 @@ class Wizard(object):
             arr = Wizard.NUMBER_TO_PROPERTY[str(n)]
 
             if self.__dict__[arr[0]] is None:
-                self.edit_property(n)
+                rv = self.edit_property(n)
+                if rv is None:
+                    return None
 
         rv = questionary.confirm("All settings have been entered. Proceed with CloudReactor setup?").ask()
 
+        # TODO: check saved state in case we uploaded already
         if rv:
             self.start_cloudformation_template_upload()
 
@@ -181,29 +194,29 @@ class Wizard(object):
         elif number == n + 2:
             exit(0)
 
-        self.edit_property(number)
-        return True
+        return self.edit_property(number)
 
     def edit_property(self, n):
         arr = Wizard.NUMBER_TO_PROPERTY[str(n)]
         p = arr[0]
 
         if p == 'api_key':
-            self.ask_for_api_key()
+            return self.ask_for_api_key()
         elif p == 'run_environment_name':
-            self.ask_for_run_environment_name()
+            return self.ask_for_run_environment_name()
         elif p == 'aws_access_key':
-            self.ask_for_aws_access_key()
+            return self.ask_for_aws_access_key()
         elif p == 'aws_secret_key':
-            self.ask_for_aws_secret_key()
+            return self.ask_for_aws_secret_key()
         elif p == 'aws_region':
-            self.ask_for_aws_region()
+            return self.ask_for_aws_region()
         elif p == 'cluster_arn':
-            self.ask_for_ecs_cluster_arn()
+            return self.ask_for_ecs_cluster_arn()
         elif p == 'stack_name':
-            self.ask_for_stack_name()
+            return self.ask_for_stack_name()
         else:
             print(f"{n} is not a valid choice. Please try another choice. [{p}]")
+            return None
 
     def ask_for_api_key(self):
         q = "What is your CloudReactor API key?"
@@ -218,7 +231,7 @@ class Wizard(object):
             print("Skipping CloudReactor API key for now.")
             self.existing_run_environments = None
             self.save()
-            return
+            return None
 
         if old_api_key != self.api_key:
             self.existing_run_environments = None
@@ -228,6 +241,7 @@ class Wizard(object):
         response_ok = False
         response_status = None
         response_body = None
+        page = None
 
         try:
             http = urllib3.PoolManager()
@@ -236,9 +250,8 @@ class Wizard(object):
                                  'Authorization': f"Token {self.api_key}",
                                  'Accept': 'application/json'
                              }, timeout=10.0)
-            #r = http.request('GET', 'http://httpbin.org/ip')
 
-            response_status = r.status;
+            response_status = r.status
 
             response_body = r.data.decode('utf-8')
             page = json.loads(response_body)
@@ -272,6 +285,7 @@ class Wizard(object):
             self.api_key = None
 
         print()
+        return self.api_key
 
     def ask_for_run_environment_name(self):
         q = 'What do you want to name your Run Environment? Common names are "staging" or "production".'
@@ -291,6 +305,7 @@ class Wizard(object):
         # TODO: Validate if it exists already
 
         self.save()
+        return self.run_environment_name
 
     def make_default_run_environment_name(self):
         if self.cluster_arn:
@@ -300,6 +315,76 @@ class Wizard(object):
                 name = name[(slash_index + 1):]
             return re.sub(r'[^A-Za-z-]+', '', name) or DEFAULT_RUN_ENVIRONMENT_NAME
         return DEFAULT_RUN_ENVIRONMENT_NAME
+
+    def create_or_update_run_environment(self):
+        print("The CloudFormation template has been uploaded successfully.")
+        print("The next step is to create the Run Environment in CloudReactor with the corresponding settings.")
+
+        rv = questionary.confirm("Proceed?").ask()
+
+        if not rv:
+            return rv
+
+        data = {
+            'name': self.run_environment_name,
+            'aws_account_id': self.aws_account_id,
+            'aws_default_region': self.aws_region,
+            'aws_assumed_role_external_id': self.external_id,
+            'aws_workflow_starter_access_key': self.workflow_starter_access_key,
+            'aws_events_role_arn': self.assumable_role_arn,
+            'aws_workflow_starter_lambda_arn': self.workflow_starter_arn,
+            'execution_method_capabilities': [{
+              'type': 'AWS ECS',
+              'default_launch_type': 'FARGATE',
+              'supported_launch_types': ['FARGATE'],
+              'default_cluster_arn': self.cluster_arn,
+              'default_execution_role': self.task_execution_role_arn,
+            }]
+        }
+
+        response_ok = False
+        response_status = None
+        response_body = None
+        saved_run_environment = None
+
+        try:
+            http = urllib3.PoolManager()
+            r = http.request('POST', CLOUDREACTOR_API_BASE_URL + '/api/v1/run_environments/',
+                             body=json.dumps(data),
+                             headers={
+                                 'Authorization': f"Token {self.api_key}",
+                                 'Accept': 'application/json',
+                                 'Content-Type': 'application/json'
+                             }, timeout=10.0)
+
+            response_status = r.status
+
+            response_body = r.data.decode('utf-8')
+            saved_run_environment = json.loads(response_body)
+
+            response_ok = (response_status >= 200) and (response_status < 300)
+        except urllib3.exceptions.HTTPError as http_error:
+            print(f"An error communicating with cloudreactor.io occurred: {http_error}")
+
+        if response_ok:
+            self.saved_run_environment_uuid = saved_run_environment.get('uuid')
+
+            if not self.saved_run_environment_uuid:
+                print("The Run Environment creation response was invalid. " + HELP_MESSAGE)
+                return False
+
+            self.save()
+            return True
+        else:
+            print(f"An error occurred creating the Run Environment.")
+
+            if response_body:
+                print(f"Got response status {response_status} and response body: {response_body} from the server")
+            else:
+                print(f"Got response status {response_status} from the server")
+
+        print()
+        return False
 
     def ask_for_aws_region(self):
         old_aws_region = self.aws_region
@@ -330,6 +415,7 @@ class Wizard(object):
             self.clear_aws_state()
 
         self.validate_aws_access()
+        return self.aws_access_key
 
     def ask_for_aws_secret_key(self):
         old_aws_secret_key = self.aws_secret_key
@@ -344,6 +430,7 @@ class Wizard(object):
             self.clear_aws_state()
 
         self.validate_aws_access()
+        return self.aws_secret_key
 
     def ask_for_ecs_cluster_arn(self):
         if not self.aws_region:
@@ -400,7 +487,7 @@ class Wizard(object):
 
             if self.stack_name is None:
                 print("Skipping stack name for now.\n")
-                return
+                return None
 
             if CLOUDFORMATION_STACK_NAME_REGEX.fullmatch(self.stack_name) is None:
                 print(f"'{self.stack_name}' is not a valid CloudFormation stack name. Stack names can only contain alphanumeric characters and dashes, no underscores.")
@@ -486,8 +573,11 @@ class Wizard(object):
                 ])
 
             self.cluster_arn = resp['cluster']['clusterArn']
+            self.available_cluster_arns = [self.cluster_arn] + (self.available_cluster_arns or [])
+
             print(f"Successfully created ECS cluster {self.cluster_arn} in region {self.aws_region}.\n")
             self.save()
+            return self.cluster_arn
         except Exception as ex:
             logging.warning("Failed to create ECS cluster.")
             print(f"Failed to create ECS cluster: {ex}")
@@ -577,7 +667,7 @@ class Wizard(object):
                     print(f"CloudFormation stack '{self.stack_name}' was deleted, please check your settings and try again.\n")
                     self.uploaded_stack_id = None
                     self.save()
-                    return False
+                    return None
 
                 stack = stacks[0]
                 status = stack['StackStatus']
@@ -603,49 +693,80 @@ class Wizard(object):
                             logging.warning(f"Got unknown output '{output_key}' with value '{output_value}'.")
 
                     if self.assumable_role_arn and self.task_execution_role_arn and self.workflow_starter_arn:
+                        self.stack_upload_status = status
                         self.stack_upload_succeeded = True
                         self.save()
-                        print(f"CloudFormation stack upload was successful.")
                         return True
 
-                    print('Something was missing from the stack output. Please contact support@cloudreactor.io for help.\n')
+                    print('Something was missing from the stack output. ' + HELP_MESSAGE + '\n')
                     self.stack_upload_succeeded = False
                     self.save()
-                    return False
+                    return None
                 else:
+                    self.stack_upload_status = status
+                    self.stack_upload_status_reason = stack.get('StackStatusReason')
                     self.stack_upload_finished_at = datetime.now()
                     self.stack_upload_succeeded = False
                     self.save()
-
-                    print(f"CloudFormation stack upload failed with status '{status}' and reason '{stack['StackStatusReason']}'.")
-                    rv = questionary.confirm('Do you want to delete the stack and try again?').ask()
-                    if rv:
-                        self.delete_stack(cf_client)
-                    return False
+                    return None
 
     def delete_stack(self, cf_client=None):
         stack_id = self.uploaded_stack_id or self.stack_name
         if not stack_id:
             print("No CloudFormation stack found to delete.")
-            return
+            return None
 
         if cf_client is None:
             cf_client = self.make_boto_client('cloudformation')
 
         if cf_client is None:
-            print("AWS authentication is not working, can't delete CloudFormation stack.\n")
-            return
+            print("AWS authentication is not working, can't delete CloudFormation stack. Please check your credentials.\n")
+            return None
 
         try:
             cf_client.delete_stack(StackName=stack_id)
             print(f"Stack '{stack_id}' was scheduled for deletion. It may take a few minutes before the stack is completely deleted.\n")
             # TODO: wait for stack deletion
             self.clear_stack_upload_state()
-
+            return True
         except Exception as ex:
             logging.warning("Can't delete stack", exc_info=True)
             print(f"Can't delete CloudFormation stack '{self.uploaded_stack_id}', error = {ex}")
             print("You can use the AWS Console to delete the CloudFormation stack manually. You can still use this wizard to upload another CloudFormation stack with a different name.\n")
+            return None
+
+    def handle_stack_upload_finished(self, cf_client=None):
+        if self.stack_upload_succeeded:
+            print(f"The CloudFormation stack upload was successful.")
+            return self.create_or_update_run_environment()
+        else:
+            reason = self.stack_upload_status_reason or '(Unknown)'
+            print(f"CloudFormation stack upload failed with status '{self.stack_upload_status}' and reason '{reason}'.")
+            rv = questionary.confirm('Do you want to delete the stack and try again?').ask()
+            if rv:
+                self.delete_stack(cf_client)
+
+            self.clear_stack_upload_state()
+            return False
+
+    def handle_run_environment_saved(self):
+        print(f"The Run Environment '{self.run_environment_name}' was created successfully.\n")
+        print("Congratulations, you've completed all the steps to setup your AWS environment!\n")
+        print("You can view your new Run Environment at " + self.make_run_environment_url())
+        print("You may optionally add default subnets and security groups there.\n")
+        print("To deploy a task managed and monitored by CloudReactor, please follow the instructions at https://docs.cloudreactor.io/\n")
+        print("We hope you enjoy using CloudReactor!")
+        print()
+
+        # TODO add options to save to another Run Environment, clear all settings
+        exit(0)
+
+    def make_run_environment_url(self):
+        if self.saved_run_environment_uuid is None:
+            return None
+
+        return "https://dash.cloudreactor.io/run_environments/" + \
+                urllib.parse.quote(self.saved_run_environment_uuid) + '/'
 
     def make_boto_client(self, service_name: str):
         if self.aws_access_key and self.aws_secret_key:
@@ -662,7 +783,7 @@ class Wizard(object):
         self.cluster_arn = None
         self.external_id = None
         self.workflow_starter_access_key = None
-        self.uploaded_stack_id = None
+        self.clear_stack_upload_state()
         self.save()
 
     def clear_stack_upload_state(self):
@@ -675,6 +796,8 @@ class Wizard(object):
         self.stack_upload_started_at = None
         self.stack_upload_succeeded = None
         self.stack_upload_finished_at = None
+        self.stack_upload_status = None
+        self.stack_upload_status_reason = None
         self.save()
 
     def generate_random_key(self):
