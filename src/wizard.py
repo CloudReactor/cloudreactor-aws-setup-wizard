@@ -766,7 +766,7 @@ class Wizard(object):
             return None
 
         return "https://dash.cloudreactor.io/run_environments/" + \
-                urllib.parse.quote(self.saved_run_environment_uuid) + '/'
+                urllib.parse.quote(self.saved_run_environment_uuid)
 
     def make_boto_client(self, service_name: str):
         if self.aws_access_key and self.aws_secret_key:
