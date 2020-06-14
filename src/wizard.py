@@ -80,17 +80,17 @@ class Wizard(object):
         '1': ['aws_region', 'AWS region'],
         '2': ['aws_access_key', 'AWS access key'],
         '3': ['aws_secret_key', 'AWS secret key'],
-        '4': ['cluster_arn', 'AWS ECS Cluster'],
-        '5': ['stack_name', 'CloudFormation stack name'],
+        '4': ['stack_name', 'CloudFormation stack name'],
+        '5': ['cluster_arn', 'AWS ECS Cluster'],
         '6': ['api_key', 'CloudReactor API key'],
         '7': ['run_environment_name', 'CloudReactor Run Environment'],
     }
 
     def __init__(self, deployment: str):
         self.deployment_environment = deployment
+        self.aws_region = None
         self.aws_access_key = None
         self.aws_secret_key = None
-        self.aws_region = None
         self.aws_account_id = None
         self.available_cluster_arns = None
         self.cluster_arn = None
@@ -98,6 +98,7 @@ class Wizard(object):
         self.run_environment_name = None
         self.existing_run_environments = None
         self.stack_name = None
+        self.stack_id_to_update = None
         self.external_id = None
         self.workflow_starter_access_key = None
         self.uploaded_stack_id = None
@@ -114,13 +115,14 @@ class Wizard(object):
         self.mode = Wizard.MODE_INTERVIEW
 
     def reset(self):
+        self.aws_region = None
         self.aws_access_key = None
         self.aws_secret_key = None
-        self.aws_region = None
         self.api_key = None
         self.run_environment_name = None
         self.existing_run_environments = None
         self.stack_name = None
+        self.stack_id_to_update = None
         self.saved_run_environment_uuid = None
         self.mode = Wizard.MODE_INTERVIEW
         self.clear_aws_state()
@@ -155,29 +157,35 @@ class Wizard(object):
         for i in range(property_count):
             n = i + 1
             arr = Wizard.NUMBER_TO_PROPERTY[str(n)]
-            choices.append(f"{n}. {arr[1]}: {str(self.__dict__[arr[0]] or '(Not Set)')}")
+            attr = arr[0]
+            v = self.__dict__[attr]
+
+            if v and (attr == 'aws_secret_key'):
+                v = v[0] + ('*' * max(len(v) - 2, 0)) + v[-1]
+
+            choices.append(f"{n}. {arr[1]}: {str(v or '(Not Set)')}")
         return choices
 
     def run(self):
         finished = False
+        first_run = False
         while not finished:
             rv = None
             if self.saved_run_environment_uuid:
                 rv = self.handle_run_environment_saved()
-            elif self.stack_upload_finished_at:
+            elif self.uploaded_stack_id and not self.stack_upload_finished_at:
                 rv = self.handle_stack_upload_finished()
-            elif self.uploaded_stack_id:
-                rv = self.wait_for_stack_upload()
 
             if rv is None:
                 self.print_menu()
 
-                if self.mode == Wizard.MODE_INTERVIEW:
+                if (not first_run) and (self.mode == Wizard.MODE_INTERVIEW):
                     rv = questionary.confirm("Continue step-by-step interview? (n switches to editing settings)").ask()
                     if not rv:
                         self.mode = Wizard.MODE_EDIT
                         self.save()
 
+                first_run = False
                 proceed = True
 
                 while proceed:
@@ -205,7 +213,7 @@ class Wizard(object):
 
         # TODO: check saved state in case we uploaded already
         if rv:
-            self.start_cloudformation_template_upload()
+            self.create_or_update_run_environment()
 
         return False
 
@@ -220,6 +228,9 @@ class Wizard(object):
         selected = questionary.select(
             "Which setting do you want to edit?",
             choices=choices).ask()
+
+        if selected is None:
+            return None
 
         dot_index = selected.find('.')
         number = int(selected[:dot_index])
@@ -236,20 +247,20 @@ class Wizard(object):
         arr = Wizard.NUMBER_TO_PROPERTY[str(n)]
         p = arr[0]
 
-        if p == 'api_key':
-            return self.ask_for_api_key()
-        elif p == 'run_environment_name':
-            return self.ask_for_run_environment_name()
+        if p == 'aws_region':
+            return self.ask_for_aws_region()
         elif p == 'aws_access_key':
             return self.ask_for_aws_access_key()
         elif p == 'aws_secret_key':
             return self.ask_for_aws_secret_key()
-        elif p == 'aws_region':
-            return self.ask_for_aws_region()
-        elif p == 'cluster_arn':
-            return self.ask_for_ecs_cluster_arn()
         elif p == 'stack_name':
             return self.ask_for_stack_name()
+        elif p == 'api_key':
+            return self.ask_for_api_key()
+        elif p == 'run_environment_name':
+            return self.ask_for_run_environment_name()
+        elif p == 'cluster_arn':
+            return self.ask_for_ecs_cluster_arn()
         else:
             print(f"{n} is not a valid choice. Please try another choice. [{p}]")
             return None
@@ -469,73 +480,117 @@ class Wizard(object):
         self.validate_aws_access()
         return self.aws_secret_key
 
-    def ask_for_ecs_cluster_arn(self):
-        if not self.aws_region:
-            print("You must set the AWS region before selecting an ECS cluster.\n")
-            return None
-
-        ecs_client = self.make_boto_client('ecs')
-
-        if ecs_client is None:
-            print("You must set your AWS credentials before selecting an ECS cluster.\n")
-            return None
-
-        self.available_cluster_arns = None
-        try:
-            resp = ecs_client.list_clusters(maxResults=100)
-            self.available_cluster_arns = resp['clusterArns']
-            self.save()
-        except Exception as ex:
-            logging.warning("Can't list clusters", exc_info=True)
-
-        if (self.available_cluster_arns is None) or (len(self.available_cluster_arns) == 0):
-            if len(self.available_cluster_arns) == 0:
-                rv = questionary.confirm(f"No ECS clusters found in region {self.aws_region}. Do you want to create one?").ask()
-
-                if rv:
-                    return self.create_cluster(ecs_client)
-
-            self.cluster_arn = None
-            self.save()
-            return None
-
-        choices = self.available_cluster_arns + [CREATE_NEW_ECS_CLUSTER_CHOICE]
-
-        selection = questionary.select(
-            "Which ECS cluster do you want to use to run your tasks?",
-            choices=choices).ask()
-
-        if selection == CREATE_NEW_ECS_CLUSTER_CHOICE:
-            return self.create_cluster(ecs_client)
-        else:
-            self.cluster_arn = selection
-
-        print(f"Using ECS cluster '{self.cluster_arn}'.\n")
-        self.save()
-        return self.cluster_arn
-
     def ask_for_stack_name(self):
-        default_stack_name = self.stack_name or self.make_default_stack_name()
+        print("To allow CloudReactor to run tasks on your behalf, you'll need to install an AWS CloudFormation template that grants CloudReactor permissions.")
+        print(f"To see the resources that will be added, please see {CLOUDFORMATION_TEMPLATE_URL}")
 
-        good_stack_name = False
-        while not good_stack_name:
-            self.stack_name = questionary.text(
-                f"What do you want to name the CloudFormation stack? [{default_stack_name}]").ask() or default_stack_name
+        cf_client = self.make_boto_client('cloudformation')
 
-            if self.stack_name is None:
+        if not cf_client:
+            print("You must set your AWS credentials before installing a CloudFormation template.\n")
+            return None
+
+        existing_stacks = self.list_stacks(cf_client=cf_client)
+        existing_stack_names = [stack['name'] for stack in (existing_stacks or [])]
+
+        old_uploaded_stack_name = None
+        if self.uploaded_stack_id:
+            old_uploaded_stack_name = self.stack_name
+
+        should_create = True
+        if len(existing_stack_names) > 0:
+            print()
+            print("If you've never set up CloudReactor before, you should install a new CloudFormation stack.")
+            selection = questionary.select(
+                'Do you want to install a new CloudFormation stack or update and use an existing one?',
+                choices=['Install a new stack', 'Update and use an existing stack']).ask()
+
+            if selection is None:
                 print("Skipping stack name for now.\n")
                 return None
 
-            if CLOUDFORMATION_STACK_NAME_REGEX.fullmatch(self.stack_name) is None:
-                print(f"'{self.stack_name}' is not a valid CloudFormation stack name. Stack names can only contain alphanumeric characters and dashes, no underscores.")
-                self.stack_name = None
-            else:
-                good_stack_name = True
+            should_create = (selection.find('new') >= 0)
 
-        print(f"Stack will be named '{self.stack_name}'.\n")
+        if should_create:
+            default_stack_name = self.make_default_stack_name()
+
+            if self.stack_name and (not self.uploaded_stack_id):
+                default_stack_name = self.stack_name
+
+            good_stack_name = False
+            reuse_stack = False
+            while not good_stack_name:
+                stack_name = questionary.text(
+                    f"What do you want to name the CloudFormation stack? [{default_stack_name}]").ask()
+
+                if stack_name is None:
+                    print("Skipping stack name for now.\n")
+                    return None
+
+                if not stack_name:
+                    stack_name = default_stack_name
+
+                if old_uploaded_stack_name and (stack_name == old_uploaded_stack_name):
+                    print(f"Reusing previously installed stack '{stack_name}'.")
+                    good_stack_name = True
+                    reuse_stack = True
+                elif stack_name in existing_stack_names:
+                    print(f"The name '{self.stack_name}' conflicts with an existing stack name. Please choose another name.")
+                elif CLOUDFORMATION_STACK_NAME_REGEX.fullmatch(self.stack_name) is None:
+                    print(f"'{stack_name}' is not a valid CloudFormation stack name. Stack names can only contain alphanumeric characters and dashes, no underscores.")
+                else:
+                    good_stack_name = True
+                    self.stack_name = stack_name
+
+            if not reuse_stack:
+                self.uploaded_stack_id = None
+                self.stack_id_to_update = None
+                print(f"Stack will be named '{self.stack_name}'.\n")
+        else:
+            stack_name = questionary.select("Which CloudFormation stack do you want to update and use?",
+                                            choices=existing_stack_names).ask()
+
+            if stack_name is None:
+                print("Skipping stack selection for now.\n")
+                return None
+
+            selected_stack = None
+            for stack in existing_stacks:
+                if stack.get('name') == stack_name:
+                    selected_stack = stack
+
+            if selected_stack is None:
+                logging.error(f"Can't find existing stack '{stack_name}'!")
+                return None
+
+            existing_stack_status = selected_stack.get('status') or ''
+
+            if existing_stack_status.find('PROGRESS') >= 0:
+                print(f"Stack {stack_name} is still in progress with status '{existing_stack_status}', please try again later.\n")
+                self.uploaded_stack_id = None
+                return None
+
+            self.stack_name = stack_name
+            self.uploaded_stack_id = None
+            self.stack_id_to_update = selected_stack['stack_id']
 
         self.save()
-        return self.stack_name
+
+        if self.uploaded_stack_id is None:
+            rv = self.start_cloudformation_template_upload(cf_client=cf_client)
+            if not rv:
+                return None
+
+        if self.uploaded_stack_id and not self.stack_upload_finished_at:
+            rv = self.wait_for_stack_upload(cf_client=cf_client)
+
+            if rv:
+                print(f"The CloudFormation stack installation was successful.")
+                return rv
+
+            return None
+        else:
+            return self.uploaded_stack_id
 
     def make_default_stack_name(self):
         name = 'CloudReactor'
@@ -573,6 +628,50 @@ class Wizard(object):
 
         self.save()
         return self.aws_account_id
+
+    def ask_for_ecs_cluster_arn(self):
+        if not self.aws_region:
+            print("You must set the AWS region before selecting an ECS cluster.\n")
+            return None
+
+        ecs_client = self.make_boto_client('ecs')
+
+        if ecs_client is None:
+            print("You must set your AWS credentials before selecting an ECS cluster.\n")
+            return None
+
+        self.available_cluster_arns = None
+        try:
+            resp = ecs_client.list_clusters(maxResults=100)
+            self.available_cluster_arns = resp['clusterArns']
+            self.save()
+        except Exception as ex:
+            logging.warning("Can't list clusters", exc_info=True)
+
+        if (self.available_cluster_arns is None) or (len(self.available_cluster_arns) == 0):
+            rv = questionary.confirm(f"No ECS clusters found in region {self.aws_region}. Do you want to create one?").ask()
+
+            if rv:
+                return self.create_cluster(ecs_client)
+
+            self.cluster_arn = None
+            self.save()
+            return None
+
+        choices = self.available_cluster_arns + [CREATE_NEW_ECS_CLUSTER_CHOICE]
+
+        selection = questionary.select(
+            "Which ECS cluster do you want to use to run your tasks?",
+            choices=choices).ask()
+
+        if selection == CREATE_NEW_ECS_CLUSTER_CHOICE:
+            return self.create_cluster(ecs_client)
+        else:
+            self.cluster_arn = selection
+
+        print(f"Using ECS cluster '{self.cluster_arn}'.\n")
+        self.save()
+        return self.cluster_arn
 
     def create_cluster(self, ecs_client=None):
         if ecs_client is None:
@@ -625,65 +724,98 @@ class Wizard(object):
             return re.sub(r'[^A-Za-z-]+', '', self.run_environment_name) or DEFAULT_ECS_CLUSTER_NAME
         return DEFAULT_ECS_CLUSTER_NAME
 
-    def start_cloudformation_template_upload(self):
-        cf_client = self.make_boto_client('cloudformation')
+    def start_cloudformation_template_upload(self, cf_client=None):
+        if not cf_client:
+            cf_client = self.make_boto_client('cloudformation')
 
         if not cf_client:
-            print("You must set your AWS credentials uploading a CloudFormation template.\n")
+            print("You must set your AWS credentials before installing a CloudFormation template.\n")
             return None
 
-        self.external_id = self.generate_random_key()
-        self.workflow_starter_access_key = self.generate_random_key()
+        # TODO: update stack
         self.stack_upload_started_at = datetime.now()
 
         try:
-            resp = cf_client.create_stack(
-                StackName=self.stack_name,
-                TemplateURL=CLOUDFORMATION_TEMPLATE_URL,
-                Parameters=[
-                    {
-                        'ParameterKey': 'ExternalID',
-                        'ParameterValue': self.external_id,
-                        'UsePreviousValue': False,
-                    },
-                    {
-                        'ParameterKey': 'WorkflowStarterAccessKey',
-                        'ParameterValue': self.workflow_starter_access_key,
-                        'UsePreviousValue': False,
-                    }
-                ],
-                Capabilities=[
-                    'CAPABILITY_NAMED_IAM'
-                ]
-            )
+            resp = None
+            if self.stack_id_to_update:
+                resp = cf_client.update_stack(
+                    StackName=self.stack_id_to_update,
+                    TemplateURL=CLOUDFORMATION_TEMPLATE_URL,
+                    Parameters=[
+                        {
+                            'ParameterKey': 'ExternalID',
+                            'UsePreviousValue': True,
+                        },
+                        {
+                            'ParameterKey': 'WorkflowStarterAccessKey',
+                            'UsePreviousValue': True,
+                        }
+                    ],
+                    Capabilities=[
+                        'CAPABILITY_NAMED_IAM'
+                    ]
+                )
+            else:
+                self.external_id = self.generate_random_key()
+                self.workflow_starter_access_key = self.generate_random_key()
+                resp = cf_client.create_stack(
+                    StackName=self.stack_name,
+                    TemplateURL=CLOUDFORMATION_TEMPLATE_URL,
+                    Parameters=[
+                        {
+                            'ParameterKey': 'ExternalID',
+                            'ParameterValue': self.external_id,
+                            'UsePreviousValue': False,
+                        },
+                        {
+                            'ParameterKey': 'WorkflowStarterAccessKey',
+                            'ParameterValue': self.workflow_starter_access_key,
+                            'UsePreviousValue': False,
+                        }
+                    ],
+                    Capabilities=[
+                        'CAPABILITY_NAMED_IAM'
+                    ]
+                )
 
             self.uploaded_stack_id = resp['StackId']
         except Exception as ex:
-            logging.warning("Failed to upload stack", exc_info=True)
-            print(f"Failed to upload stack: {ex}")
+            ex_str = str(ex)
+            if self.stack_id_to_update and (ex_str.find('No updates are to be performed') >= 0):
+                print(f"No stack updates were necessary. Using existing stack name '{self.stack_name}'.\n")
+                return self.uploaded_stack_id
+            else:
+                logging.warning("Failed to install stack", exc_info=True)
+                print(f"Failed to install stack: {ex}")
 
-            exception_str = str(ex)
+                exception_str = str(ex)
 
-            if exception_str.find('AlreadyExistsException'):
-                rv = questionary.confirm(f"That stack already exists. Delete it?").ask()
+                if exception_str.find('AlreadyExistsException'):
+                    rv = questionary.confirm(f"That stack already exists. Delete it?").ask()
 
-                if rv:
-                    self.delete_stack(cf_client)
+                    if rv:
+                        self.delete_stack(cf_client)
 
-            self.clear_stack_upload_state()
-            return None
+                self.clear_stack_upload_state()
+                return None
 
         self.save()
 
-        print(f"Started CloudFormation template upload for stack '{self.stack_name}', stack ID is {self.uploaded_stack_id}.")
+        print(f"Started CloudFormation template installation for stack '{self.stack_name}', stack ID is {self.uploaded_stack_id}.")
         return self.uploaded_stack_id
 
-    def wait_for_stack_upload(self):
+    def wait_for_stack_upload(self, cf_client=None):
         if not self.uploaded_stack_id:
             logging.error("wait_for_stack_upload() called but, but no stack ID was saved.")
             return False
 
-        cf_client = self.make_boto_client('cloudformation')
+        if not cf_client:
+            cf_client = self.make_boto_client('cloudformation')
+
+        if not cf_client:
+            print("Your AWS credentials are invalid. Please check them and try again.\n")
+            return None
+
         done = False
 
         while not done:
@@ -710,7 +842,7 @@ class Wizard(object):
                 status = stack['StackStatus']
 
                 if status in CLOUDFORMATION_IN_PROGRESS_STATUSES:
-                    print(f"CloudFormation stack upload is still in progress ({status}). Waiting 10 seconds before checking again ...")
+                    print(f"CloudFormation stack installation is still in progress ({status}). Waiting 10 seconds before checking again ...")
                     time.sleep(10)
                 elif status in CLOUDFORMATION_SUCCESSFUL_STATUSES:
                     self.stack_upload_finished_at = datetime.now()
@@ -729,7 +861,20 @@ class Wizard(object):
                         else:
                             logging.warning(f"Got unknown output '{output_key}' with value '{output_value}'.")
 
-                    if self.assumable_role_arn and self.task_execution_role_arn and self.workflow_starter_arn:
+                    params = stack['Parameters'] or []
+
+                    for param in params:
+                        param_key = param['ParameterKey']
+                        param_value = param['ParameterValue']
+
+                        if param_key == 'ExternalID':
+                            self.external_id = param_value
+                        elif param_key == 'WorkflowStarterAccessKey':
+                            self.workflow_starter_access_key = param_value
+
+                    if self.external_id and self.workflow_starter_access_key and \
+                            self.assumable_role_arn and self.task_execution_role_arn and \
+                            self.workflow_starter_arn:
                         self.stack_upload_status = status
                         self.stack_upload_succeeded = True
                         self.save()
@@ -769,16 +914,16 @@ class Wizard(object):
         except Exception as ex:
             logging.warning("Can't delete stack", exc_info=True)
             print(f"Can't delete CloudFormation stack '{self.uploaded_stack_id}', error = {ex}")
-            print("You can use the AWS Console to delete the CloudFormation stack manually. You can still use this wizard to upload another CloudFormation stack with a different name.\n")
+            print("You can use the AWS Console to delete the CloudFormation stack manually. You can still use this wizard to install another CloudFormation stack with a different name.\n")
             return None
 
     def handle_stack_upload_finished(self, cf_client=None):
         if self.stack_upload_succeeded:
-            print(f"The CloudFormation stack upload was successful.")
+            print(f"The CloudFormation stack installation was successful.")
             return self.create_or_update_run_environment()
         else:
             reason = self.stack_upload_status_reason or '(Unknown)'
-            print(f"CloudFormation stack upload failed with status '{self.stack_upload_status}' and reason '{reason}'.")
+            print(f"CloudFormation stack installation failed with status '{self.stack_upload_status}' and reason '{reason}'.")
             rv = questionary.confirm('Do you want to delete the stack and try again?').ask()
             if rv:
                 self.delete_stack(cf_client)
@@ -838,6 +983,42 @@ class Wizard(object):
 
     def generate_random_key(self):
         return ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(KEY_LENGTH))
+
+    def list_stacks(self, cf_client=None):
+        print(f"Checking for existing CloudFormation stacks in region {self.aws_region} ...")
+
+        if not cf_client:
+            cf_client = self.make_boto_client('cloudformation')
+
+        if not cf_client:
+            print('We could not determine your existing CloudFormation stacks. Please check your AWS credentials.')
+            return None
+
+        resp = None
+        try:
+            resp = cf_client.list_stacks()
+        except Exception as ex:
+            logger.warning(f"Failed to list stacks: {ex}")
+            print('We could not determine your existing CloudFormation stacks. Please check your AWS credentials and permissions.')
+            return None
+
+        existing_stacks = []
+        stack_summaries = resp.get('StackSummaries') or []
+
+        for summary in stack_summaries:
+            stack_id = summary.get('StackId')
+            name = summary.get('StackName')
+            status = summary.get('StackStatus')
+
+            if stack_id and name and status and \
+                    (status != 'DELETE_COMPLETE') and (status != 'DELETE_FAILED'):
+                existing_stacks.append({
+                    'stack_id': stack_id,
+                    'name': name,
+                    'status': status
+                })
+
+        return existing_stacks
 
 
 if __name__ == '__main__':
