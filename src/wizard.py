@@ -17,12 +17,43 @@ import questionary
 DEFAULT_LOG_LEVEL = 'ERROR'
 SAVED_STATE_FILENAME = 'saved_settings.json'
 DEFAULT_PREFIX = ' (Default)'
-KEY_LENGTH = 32
+
+AWS_REGIONS = [
+    'us-east-1',
+    'us-east-2',
+    'us-west-1',
+    'us-west-2',
+    'us-gov-east-1',
+    'us-gov-west-1',
+    'ap-west-1',
+    'ap-south-1',
+    'ap-northeast-1',
+    'ap-northeast-2',
+    'ap-northeast-3',
+    'eu-central-1',
+    'eu-west-1',
+    'eu-west-2',
+    'eu-west-3',
+    'eu-north-1',
+    'me-south-1',
+    'sa-east-1',
+    'ca-central-1',
+    'cn-north-1',
+    'cn-northwest-1',
+]
+
+DEFAULT_AWS_REGION = 'us-west-2'
+
 DEFAULT_RUN_ENVIRONMENT_NAME = 'staging'
 CREATE_NEW_ECS_CLUSTER_CHOICE = 'Create new ECS cluster ...'
 ECS_CLUSTER_NAME_REGEX = re.compile(r'[a-zA-Z][-a-zA-Z0-9]{0,254}')
 DEFAULT_ECS_CLUSTER_NAME = 'staging'
+
+KEY_LENGTH = 32
+
+# TODO make URL from deployment environment
 CLOUDFORMATION_TEMPLATE_URL = 'https://cloudreactor-customer-setup.s3-us-west-2.amazonaws.com/cloudreactor-aws-role-template.json'
+
 CLOUDFORMATION_STACK_NAME_REGEX = re.compile(r'[a-zA-Z][-a-zA-Z0-9]{0,127}')
 CLOUDFORMATION_IN_PROGRESS_STATUSES = set([
     'CREATE_IN_PROGRESS', 'UPDATE_IN_PROGRESS',
@@ -36,33 +67,6 @@ CLOUDFORMATION_SUCCESSFUL_STATUSES = set([
 CLOUDREACTOR_API_BASE_URL = os.environ.get('CLOUDREACTOR_API_BASE_URL', 'https://api.cloudreactor.io')
 HELP_MESSAGE = 'Please contact support@cloudreactor.io for help.'
 
-AWS_REGIONS = [
-    "us-east-1",
-    "us-east-2",
-    "us-west-1",
-    "us-west-2",
-    "us-gov-east-1",
-    "us-gov-west-1",
-    "ap-west-1",
-    "ap-south-1",
-    "ap-northeast-1",
-    "ap-northeast-2",
-    "ap-northeast-3",
-    "eu-central-1",
-    "eu-west-1",
-    "eu-west-2",
-    "eu-west-3",
-    "eu-north-1",
-    "me-south-1",
-    "sa-east-1",
-    "ca-central-1",
-    "cn-north-1",
-    "cn-northwest-1",
-]
-
-DEFAULT_AWS_REGION = 'us-west-2'
-
-
 def print_banner():
     with open('banner.txt') as f:
         print(f.read())
@@ -73,26 +77,26 @@ class Wizard(object):
     MODE_EDIT = 'edit'
 
     NUMBER_TO_PROPERTY = {
-        '1': ['api_key', 'CloudReactor API key'],
-        '2': ['run_environment_name', 'CloudReactor Run Environment'],
-        '3': ['aws_region', 'AWS region'],
-        '4': ['aws_access_key', 'AWS access key'],
-        '5': ['aws_secret_key', 'AWS secret key'],
-        '6': ['cluster_arn', 'AWS ECS Cluster'],
-        '7': ['stack_name', 'CloudFormation stack name']
+        '1': ['aws_region', 'AWS region'],
+        '2': ['aws_access_key', 'AWS access key'],
+        '3': ['aws_secret_key', 'AWS secret key'],
+        '4': ['cluster_arn', 'AWS ECS Cluster'],
+        '5': ['stack_name', 'CloudFormation stack name'],
+        '6': ['api_key', 'CloudReactor API key'],
+        '7': ['run_environment_name', 'CloudReactor Run Environment'],
     }
 
     def __init__(self, deployment: str):
         self.deployment_environment = deployment
-        self.run_environment_name = None
-        self.api_key = None
-        self.existing_run_environments = None
         self.aws_access_key = None
         self.aws_secret_key = None
         self.aws_region = None
         self.aws_account_id = None
         self.available_cluster_arns = None
         self.cluster_arn = None
+        self.api_key = None
+        self.run_environment_name = None
+        self.existing_run_environments = None
         self.stack_name = None
         self.external_id = None
         self.workflow_starter_access_key = None
@@ -108,6 +112,38 @@ class Wizard(object):
         self.saved_run_environment_uuid = None
 
         self.mode = Wizard.MODE_INTERVIEW
+
+    def reset(self):
+        self.aws_access_key = None
+        self.aws_secret_key = None
+        self.aws_region = None
+        self.api_key = None
+        self.run_environment_name = None
+        self.existing_run_environments = None
+        self.stack_name = None
+        self.saved_run_environment_uuid = None
+        self.mode = Wizard.MODE_INTERVIEW
+        self.clear_aws_state()
+
+    def clear_aws_state(self):
+        self.aws_account_id = None
+        self.available_cluster_arns = None
+        self.cluster_arn = None
+        self.clear_stack_upload_state()
+
+    def clear_stack_upload_state(self):
+        self.uploaded_stack_id = None
+        self.external_id = None
+        self.workflow_starter_access_key = None
+        self.assumable_role_arn = None
+        self.task_execution_role_arn = None
+        self.workflow_starter_arn = None
+        self.stack_upload_started_at = None
+        self.stack_upload_succeeded = None
+        self.stack_upload_finished_at = None
+        self.stack_upload_status = None
+        self.stack_upload_status_reason = None
+        self.save()
 
     def print_menu(self):
         for choice in self.make_property_choices():
@@ -370,7 +406,7 @@ class Wizard(object):
             self.saved_run_environment_uuid = saved_run_environment.get('uuid')
 
             if not self.saved_run_environment_uuid:
-                print("The Run Environment creation response was invalid. " + HELP_MESSAGE)
+                print('The Run Environment creation response was invalid. ' + HELP_MESSAGE)
                 return False
 
             self.save()
@@ -401,10 +437,11 @@ class Wizard(object):
             self.clear_aws_state()
 
         self.save()
+        return self.aws_region
 
     def ask_for_aws_access_key(self):
         old_aws_access_key = self.aws_access_key
-        q = 'What AWS access key do you want to use. Type "none" to use the default permissions on this machine.'
+        q = 'What AWS access key do you want to use? Type "none" to use the default permissions on this machine.'
 
         if old_aws_access_key:
             q += f" [{old_aws_access_key}]"
@@ -419,12 +456,12 @@ class Wizard(object):
 
     def ask_for_aws_secret_key(self):
         old_aws_secret_key = self.aws_secret_key
-        q = 'What AWS secret key do you want to use. Type "none" to use the default permissions on this machine.'
+        q = 'What AWS secret key do you want to use? Type "none" to use the default permissions on this machine.'
 
         if old_aws_secret_key:
             q += f" [{old_aws_secret_key}]"
 
-        self.aws_secret_key = questionary.text(q).ask() or old_aws_secret_key
+        self.aws_secret_key = questionary.password(q).ask() or old_aws_secret_key
 
         if self.aws_secret_key != self.aws_access_key:
             self.clear_aws_state()
@@ -754,12 +791,33 @@ class Wizard(object):
         print("Congratulations, you've completed all the steps to setup your AWS environment!\n")
         print("You can view your new Run Environment at " + self.make_run_environment_url())
         print("You may optionally add default subnets and security groups there.\n")
-        print("To deploy a task managed and monitored by CloudReactor, please follow the instructions at https://docs.cloudreactor.io/\n")
-        print("We hope you enjoy using CloudReactor!")
-        print()
 
-        # TODO add options to save to another Run Environment, clear all settings
-        exit(0)
+        choices = [
+            '1. Create another Run Environment',
+            '2. Reset all settings and start over',
+            '3. Quit'
+        ]
+
+        selected = questionary.select('What would you like to do next?',
+                                    choices=choices).ask()
+        dot_index = selected.find('.')
+        number = int(selected[:dot_index])
+
+        if number == 1:
+            self.mode = Wizard.MODE_INTERVIEW
+            self.run_environment_name = None
+            self.saved_run_environment_uuid = None
+            self.save()
+            return self.ask_for_run_environment_name()
+        elif number == 2:
+            self.mode = Wizard.MODE_INTERVIEW
+            self.reset()
+            return True
+        else:
+            print("To deploy a task managed and monitored by CloudReactor, please follow the instructions at https://docs.cloudreactor.io/\n")
+            print("We hope you enjoy using CloudReactor!")
+            print()
+            exit(0)
 
     def make_run_environment_url(self):
         if self.saved_run_environment_uuid is None:
@@ -777,28 +835,6 @@ class Wizard(object):
 
         # TODO: use default credentials
         return None
-
-    def clear_aws_state(self):
-        self.available_cluster_arns = None
-        self.cluster_arn = None
-        self.external_id = None
-        self.workflow_starter_access_key = None
-        self.clear_stack_upload_state()
-        self.save()
-
-    def clear_stack_upload_state(self):
-        self.uploaded_stack_id = None
-        self.external_id = None
-        self.workflow_starter_access_key = None
-        self.assumable_role_arn = None
-        self.task_execution_role_arn = None
-        self.workflow_starter_arn = None
-        self.stack_upload_started_at = None
-        self.stack_upload_succeeded = None
-        self.stack_upload_finished_at = None
-        self.stack_upload_status = None
-        self.stack_upload_status_reason = None
-        self.save()
 
     def generate_random_key(self):
         return ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(KEY_LENGTH))
@@ -843,9 +879,9 @@ if __name__ == '__main__':
             with open(SAVED_STATE_FILENAME) as f:
                 wizard = jsonpickle.decode(f.read())
         except Exception as ex:
-            print("Couldn't read saved state, starting over. Sorry about that!")
+            print("Couldn't read save file, starting over. Sorry about that!")
     else:
-        print("No save state found, starting a new saved_settings.json.")
+        print("No save file found, starting a new save file.")
 
     if wizard is None:
         wizard = Wizard(deployment=deployment_environment)
