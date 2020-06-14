@@ -168,7 +168,7 @@ class Wizard(object):
 
     def run(self):
         finished = False
-        first_run = False
+        first_run = True
         while not finished:
             rv = None
             if self.saved_run_environment_uuid:
@@ -441,6 +441,10 @@ class Wizard(object):
         self.aws_region = questionary.select(f"Which AWS region will you run ECS tasks?",
             choices=[default_aws_region + DEFAULT_PREFIX] + AWS_REGIONS).ask().replace(
             DEFAULT_PREFIX, '')
+
+        if self.aws_region is None:
+            print("Skipping AWS region for now.")
+            return None
 
         print(f"Using AWS region {wizard.aws_region}.")
 
