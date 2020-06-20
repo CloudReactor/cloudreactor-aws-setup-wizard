@@ -1,3 +1,5 @@
+from typing import List, Optional
+
 import argparse
 from datetime import datetime
 import json
@@ -13,10 +15,14 @@ import jsonpickle
 import urllib3
 import boto3
 import questionary
+import jinja2
 
 DEFAULT_LOG_LEVEL = 'ERROR'
 SAVED_STATE_FILENAME = 'saved_settings.json'
-DEFAULT_PREFIX = ' (Default)'
+DEFAULT_SUFFIX = ' (Default)'
+UNSET_STRING = '(Not Set)'
+EMPTY_LIST_STRING = '(Empty list, to be entered manually later)'
+HELP_MESSAGE = 'Please contact support@cloudreactor.io for help.'
 
 AWS_REGIONS = [
     'us-east-1',
@@ -51,9 +57,6 @@ DEFAULT_ECS_CLUSTER_NAME = 'staging'
 
 KEY_LENGTH = 32
 
-# TODO make URL from deployment environment
-CLOUDFORMATION_TEMPLATE_URL = 'https://cloudreactor-customer-setup.s3-us-west-2.amazonaws.com/cloudreactor-aws-role-template.json'
-
 CLOUDFORMATION_STACK_NAME_REGEX = re.compile(r'[a-zA-Z][-a-zA-Z0-9]{0,127}')
 CLOUDFORMATION_IN_PROGRESS_STATUSES = set([
     'CREATE_IN_PROGRESS', 'UPDATE_IN_PROGRESS',
@@ -65,7 +68,8 @@ CLOUDFORMATION_SUCCESSFUL_STATUSES = set([
 ])
 
 CLOUDREACTOR_API_BASE_URL = os.environ.get('CLOUDREACTOR_API_BASE_URL', 'https://api.cloudreactor.io')
-HELP_MESSAGE = 'Please contact support@cloudreactor.io for help.'
+
+DEFAULT_IP4_CIDR_BLOCK = '10.0.0.0/16'
 
 def print_banner():
     with open('banner.txt') as f:
@@ -79,11 +83,12 @@ class Wizard(object):
     NUMBER_TO_PROPERTY = {
         '1': ['aws_region', 'AWS region'],
         '2': ['aws_access_key', 'AWS access key'],
-        '3': ['aws_secret_key', 'AWS secret key'],
-        '4': ['stack_name', 'CloudFormation stack name'],
-        '5': ['cluster_arn', 'AWS ECS Cluster'],
-        '6': ['api_key', 'CloudReactor API key'],
-        '7': ['run_environment_name', 'CloudReactor Run Environment'],
+        '3': ['aws_secret_key', 'AWS secret key'],        
+        '4': ['cluster_arn', 'AWS ECS Cluster'],
+        '5': ['subnets', 'Subnets'],
+        '6': ['security_groups', 'Security groups'],
+        '7': ['stack_name', 'CloudFormation stack name'],
+        '8': ['api_key', 'CloudReactor API key'],    
     }
 
     def __init__(self, deployment: str):
@@ -94,9 +99,11 @@ class Wizard(object):
         self.aws_account_id = None
         self.available_cluster_arns = None
         self.cluster_arn = None
+        self.vpc_cidr_block = None
+        self.vpc_id = None
+        self.subnets = None
+        self.security_groups = None
         self.api_key = None
-        self.run_environment_name = None
-        self.existing_run_environments = None
         self.stack_name = None
         self.stack_id_to_update = None
         self.external_id = None
@@ -111,6 +118,7 @@ class Wizard(object):
         self.stack_upload_status = None
         self.stack_upload_status_reason = None
         self.saved_run_environment_uuid = None
+        self.saved_run_environment_name = None
 
         self.mode = Wizard.MODE_INTERVIEW
 
@@ -119,8 +127,7 @@ class Wizard(object):
         self.aws_access_key = None
         self.aws_secret_key = None
         self.api_key = None
-        self.run_environment_name = None
-        self.existing_run_environments = None
+        self.saved_run_environment_name = None
         self.stack_name = None
         self.stack_id_to_update = None
         self.saved_run_environment_uuid = None
@@ -131,6 +138,10 @@ class Wizard(object):
         self.aws_account_id = None
         self.available_cluster_arns = None
         self.cluster_arn = None
+        self.vpc_cidr_block = None
+        self.vpc_id = None
+        self.subnets = None
+        self.security_groups = None
         self.clear_stack_upload_state()
 
     def clear_stack_upload_state(self):
@@ -147,6 +158,9 @@ class Wizard(object):
         self.stack_upload_status_reason = None
         self.save()
 
+    def set_deployment_environment(self, deployment: str):
+        self.deployment_environment = deployment
+
     def print_menu(self):
         for choice in self.make_property_choices():
             print(choice)
@@ -162,8 +176,10 @@ class Wizard(object):
 
             if v and (attr == 'aws_secret_key'):
                 v = v[0] + ('*' * max(len(v) - 2, 0)) + v[-1]
+            elif attr in ['subnets', 'security_groups']:
+                v = self.list_to_string(v)
 
-            choices.append(f"{n}. {arr[1]}: {str(v or '(Not Set)')}")
+            choices.append(f"{n}. {arr[1]}: {str(v or UNSET_STRING)}")
         return choices
 
     def run(self):
@@ -172,9 +188,12 @@ class Wizard(object):
         while not finished:
             rv = None
             if self.saved_run_environment_uuid:
-                rv = self.handle_run_environment_saved()
-            elif self.uploaded_stack_id and not self.stack_upload_finished_at:
-                rv = self.handle_stack_upload_finished()
+                self.handle_run_environment_saved()
+            elif self.uploaded_stack_id:
+                if self.stack_upload_finished_at:
+                    rv = self.handle_stack_upload_finished()
+                else:
+                    rv = self.wait_for_stack_upload()    
 
             if rv is None:
                 self.print_menu()
@@ -215,7 +234,7 @@ class Wizard(object):
         if rv:
             self.create_or_update_run_environment()
 
-        return False
+        return None
 
     def edit(self):
         choices = self.make_property_choices()
@@ -230,7 +249,8 @@ class Wizard(object):
             choices=choices).ask()
 
         if selected is None:
-            return None
+            print("\nExiting for now. You can finish the setup process later by running this wizard again.\n")
+            exit(0)
 
         dot_index = selected.find('.')
         number = int(selected[:dot_index])
@@ -255,196 +275,36 @@ class Wizard(object):
             return self.ask_for_aws_secret_key()
         elif p == 'stack_name':
             return self.ask_for_stack_name()
+        elif p == 'subnets':
+            return self.ask_for_subnets()
+        elif p == 'security_groups':
+            return self.ask_for_security_groups()
         elif p == 'api_key':
             return self.ask_for_api_key()
-        elif p == 'run_environment_name':
-            return self.ask_for_run_environment_name()
         elif p == 'cluster_arn':
             return self.ask_for_ecs_cluster_arn()
         else:
             print(f"{n} is not a valid choice. Please try another choice. [{p}]")
             return None
 
-    def ask_for_api_key(self):
-        q = "What is your CloudReactor API key?"
-
-        old_api_key = self.api_key
-        if old_api_key:
-            q += f" [{old_api_key}]"
-
-        self.api_key = questionary.text(q).ask() or old_api_key
-
-        if not self.api_key:
-            print("Skipping CloudReactor API key for now.")
-            self.existing_run_environments = None
-            self.save()
-            return None
-
-        if old_api_key != self.api_key:
-            self.existing_run_environments = None
-
-        print()
-
-        response_ok = False
-        response_status = None
-        response_body = None
-        page = None
-
-        try:
-            http = urllib3.PoolManager()
-            r = http.request('GET', CLOUDREACTOR_API_BASE_URL + '/api/v1/run_environments/',
-                             headers={
-                                 'Authorization': f"Token {self.api_key}",
-                                 'Accept': 'application/json'
-                             }, timeout=10.0)
-
-            response_status = r.status
-
-            response_body = r.data.decode('utf-8')
-            page = json.loads(response_body)
-
-            response_ok = response_status == 200
-        except urllib3.exceptions.HTTPError as http_error:
-            print(f"An error communicating with cloudreactor.io occurred: {http_error}")
-
-        if response_ok:
-            self.existing_run_environments = page['results']
-
-            if len(self.existing_run_environments) == 0:
-                print('No current Run Environments found. Please create a new one.')
-            else:
-                print(f"There are currently {page['count']} Run Environments in your organization:")
-
-                for run_environment in self.existing_run_environments:
-                    print(run_environment['name'])
-
-            print('Your CloudReactor API key is valid.')
-
-            self.save()
-        else:
-            print(f"The CloudReactor API key '{self.api_key}' is not valid. Please check that it is correct.")
-
-            if response_body:
-                print(f"Got response status {response_status} and response body: {response_body} from the server")
-            else:
-                print(f"Got response status {response_status} from the server")
-
-            self.api_key = None
-
-        print()
-        return self.api_key
-
-    def ask_for_run_environment_name(self):
-        q = 'What do you want to name your Run Environment? Common names are "staging" or "production".'
-
-        default_run_environment_name = self.run_environment_name or self.make_default_run_environment_name()
-
-        if default_run_environment_name:
-            q += f" [{default_run_environment_name}]"
-
-        self.run_environment_name = questionary.text(q).ask() or default_run_environment_name
-
-        if self.run_environment_name:
-            print(f"Using Run Environment '{self.run_environment_name}'.\n")
-        else:
-            print("Skipping Run Environment for now.\n")
-
-        # TODO: Validate if it exists already
-
-        self.save()
-        return self.run_environment_name
-
-    def make_default_run_environment_name(self):
-        if self.cluster_arn:
-            name = self.cluster_arn
-            slash_index = name.rfind('/')
-            if slash_index >= 0:
-                name = name[(slash_index + 1):]
-            return re.sub(r'[^A-Za-z-]+', '', name) or DEFAULT_RUN_ENVIRONMENT_NAME
-        return DEFAULT_RUN_ENVIRONMENT_NAME
-
-    def create_or_update_run_environment(self):
-        print("The CloudFormation template has been uploaded successfully.")
-        print("The next step is to create the Run Environment in CloudReactor with the corresponding settings.")
-
-        rv = questionary.confirm("Proceed?").ask()
-
-        if not rv:
-            return rv
-
-        data = {
-            'name': self.run_environment_name,
-            'aws_account_id': self.aws_account_id,
-            'aws_default_region': self.aws_region,
-            'aws_assumed_role_external_id': self.external_id,
-            'aws_workflow_starter_access_key': self.workflow_starter_access_key,
-            'aws_events_role_arn': self.assumable_role_arn,
-            'aws_workflow_starter_lambda_arn': self.workflow_starter_arn,
-            'execution_method_capabilities': [{
-              'type': 'AWS ECS',
-              'default_launch_type': 'FARGATE',
-              'supported_launch_types': ['FARGATE'],
-              'default_cluster_arn': self.cluster_arn,
-              'default_execution_role': self.task_execution_role_arn,
-            }]
-        }
-
-        response_ok = False
-        response_status = None
-        response_body = None
-        saved_run_environment = None
-
-        try:
-            http = urllib3.PoolManager()
-            r = http.request('POST', CLOUDREACTOR_API_BASE_URL + '/api/v1/run_environments/',
-                             body=json.dumps(data),
-                             headers={
-                                 'Authorization': f"Token {self.api_key}",
-                                 'Accept': 'application/json',
-                                 'Content-Type': 'application/json'
-                             }, timeout=10.0)
-
-            response_status = r.status
-
-            response_body = r.data.decode('utf-8')
-            saved_run_environment = json.loads(response_body)
-
-            response_ok = (response_status >= 200) and (response_status < 300)
-        except urllib3.exceptions.HTTPError as http_error:
-            print(f"An error communicating with cloudreactor.io occurred: {http_error}")
-
-        if response_ok:
-            self.saved_run_environment_uuid = saved_run_environment.get('uuid')
-
-            if not self.saved_run_environment_uuid:
-                print('The Run Environment creation response was invalid. ' + HELP_MESSAGE)
-                return False
-
-            self.save()
-            return True
-        else:
-            print(f"An error occurred creating the Run Environment.")
-
-            if response_body:
-                print(f"Got response status {response_status} and response body: {response_body} from the server")
-            else:
-                print(f"Got response status {response_status} from the server")
-
-        print()
-        return False
-
     def ask_for_aws_region(self):
         old_aws_region = self.aws_region
         default_aws_region = old_aws_region or os.environ.get('AWS_REGION') or \
-                             os.environ.get('AWS_DEFAULT_REGION') or DEFAULT_AWS_REGION
+                             os.environ.get('AWS_DEFAULT_REGION')
+
+        choices = AWS_REGIONS
+
+        if default_aws_region:
+            choices = [default_aws_region + DEFAULT_SUFFIX] + choices 
 
         self.aws_region = questionary.select(f"Which AWS region will you run ECS tasks?",
-            choices=[default_aws_region + DEFAULT_PREFIX] + AWS_REGIONS).ask().replace(
-            DEFAULT_PREFIX, '')
+            choices=choices).ask()
 
         if self.aws_region is None:
             print("Skipping AWS region for now.")
             return None
+
+        self.aws_region = self.aws_region.replace(DEFAULT_SUFFIX, '')
 
         print(f"Using AWS region {wizard.aws_region}.")
 
@@ -486,7 +346,7 @@ class Wizard(object):
 
     def ask_for_stack_name(self):
         print("To allow CloudReactor to run tasks on your behalf, you'll need to install an AWS CloudFormation template that grants CloudReactor permissions.")
-        print(f"To see the resources that will be added, please see {CLOUDFORMATION_TEMPLATE_URL}")
+        print(f"To see the resources that will be added, please see {self.make_cloudformation_role_template_url()}")
 
         cf_client = self.make_boto_client('cloudformation')
 
@@ -685,12 +545,10 @@ class Wizard(object):
             print("You must set your AWS credentials before creating an ECS cluster.\n")
             return None
 
-        default_cluster_name = self.make_default_cluster_name()
-
         good_cluster_name = False
         while not good_cluster_name:
             cluster_name = questionary.text(
-                f"What do you want to name the ECS cluster? [{default_cluster_name}]").ask() or default_cluster_name
+                f"What do you want to name the ECS cluster?").ask()
 
             if cluster_name is None:
                 print("Skipping ECS cluster creation.\n")
@@ -723,11 +581,6 @@ class Wizard(object):
             print(f"Failed to create ECS cluster: {ex}")
             return None
 
-    def make_default_cluster_name(self):
-        if self.run_environment_name:
-            return re.sub(r'[^A-Za-z-]+', '', self.run_environment_name) or DEFAULT_ECS_CLUSTER_NAME
-        return DEFAULT_ECS_CLUSTER_NAME
-
     def start_cloudformation_template_upload(self, cf_client=None):
         if not cf_client:
             cf_client = self.make_boto_client('cloudformation')
@@ -744,7 +597,7 @@ class Wizard(object):
             if self.stack_id_to_update:
                 resp = cf_client.update_stack(
                     StackName=self.stack_id_to_update,
-                    TemplateURL=CLOUDFORMATION_TEMPLATE_URL,
+                    TemplateURL=self.make_cloudformation_role_template_url(),
                     Parameters=[
                         {
                             'ParameterKey': 'ExternalID',
@@ -764,7 +617,7 @@ class Wizard(object):
                 self.workflow_starter_access_key = self.generate_random_key()
                 resp = cf_client.create_stack(
                     StackName=self.stack_name,
-                    TemplateURL=CLOUDFORMATION_TEMPLATE_URL,
+                    TemplateURL=self.make_cloudformation_role_template_url(),
                     Parameters=[
                         {
                             'ParameterKey': 'ExternalID',
@@ -787,6 +640,7 @@ class Wizard(object):
             ex_str = str(ex)
             if self.stack_id_to_update and (ex_str.find('No updates are to be performed') >= 0):
                 print(f"No stack updates were necessary. Using existing stack name '{self.stack_name}'.\n")
+                self.uploaded_stack_id = self.stack_id_to_update
                 return self.uploaded_stack_id
             else:
                 logging.warning("Failed to install stack", exc_info=True)
@@ -935,14 +789,453 @@ class Wizard(object):
             self.clear_stack_upload_state()
             return False
 
+    def ask_for_subnets(self):
+        print()
+        print("ECS Tasks require subnets to run in. For more information see https://cloudonaut.io/fargate-networking-101/")
+        print("This step allows you to specify the default subnets for tasks associated with a CloudReactor Run Environment, so that CloudReactor can use those subnets when starting or scheduling tasks.")        
+        print("If you have existing subnets that contain AWS resources your tasks need to access, you should select them below.")        
+        print("If you don't have existing subnets, this wizard can create them for you now.")
+        print("You can also choose to skip this step and enter the subnets after the Run Environment has been created.")
+        print()
+
+        choices = []
+
+        subnets_str = self.list_to_string(self.subnets)
+
+        if self.subnets is not None:
+            choices = ['Use previously entered subnets: ' + subnets_str]
+
+        choices += [
+            'Create new subnets',
+            'Select existing subnets',
+            'Enter subnets manually',
+            'Skip subnets'
+        ]
+
+        rv = questionary.select('How would you like to specify subnets?',
+                                choices=choices).ask()
+
+        if rv is None:
+            return None
+
+        if rv.startswith('Use previous'):
+            print(f"Using previously entered subnets {subnets_str}.\n")
+            return self.subnets
+
+        if rv.startswith('Skip'):
+            print('Skipping subnets for now. You can add them manually later.\n')
+            self.subnets = []
+            self.save()
+            return self.subnets
+
+        is_create = rv.startswith('Create')
+        is_select = rv.startswith('Select')
+
+        if is_create or is_select:
+            rv = self.ask_for_vpc()
+            if not rv:
+                return None
+
+        if is_create:
+            print("Not implemented yet")
+            return None
+
+        if is_select:
+            return self.ask_for_subnets_in_vpc()
+
+
+
+
+
+        return None
+
+    def ask_for_security_groups(self):
+        print()
+        print("ECS Tasks require at least one security group that allows outbound access to the public internet.")
+        print("This step allows you to specify the default security groups to give tasks associated with a CloudReactor Run Environment, so that CloudReactor can assign those security groups when starting or scheduling tasks.")
+        print("If you have existing security groups you want to assign to your tasks by default, you should select them below.")
+        print("If you don't an existing security group, this wizard can create it for you now.")        
+        print("You can also choose to skip this step and enter the security groups after the Run Environment has been created.")
+        print()
+
+        choices = []
+
+        security_groups_str = self.list_to_string(self.security_groups)
+
+        if self.security_groups is not None:
+            choices = ['Use previously entered security groups: ' + security_groups_str]
+
+        choices += [
+            'Create a new security group',
+            'Select existing security groups',
+            'Enter security groups manually',
+            'Skip security groups'
+        ]
+
+        rv = questionary.select('How would you like to specify security_groups?',
+                                choices=choices).ask()
+
+        if rv is None:
+            return None
+
+        if rv.startswith('Use previous'):
+            print(f"Using previously entered security_groups {security_groups_str}.\n")
+            return self.security_groups
+
+        if rv.startswith('Skip'):
+            print('Skipping security_groups for now. You can add them manually later.\n')
+            self.security_groups = []
+            self.save()
+            return self.security_groups
+
+        is_create = rv.startswith('Create')
+        is_select = rv.startswith('Select')
+
+        if is_create or is_select:
+            rv = self.ask_for_vpc()
+            if not rv:
+                return None
+
+        if is_create:
+            print("Not implemented yet")
+            return None
+
+        if is_select:
+            return self.ask_for_security_groups_in_vpc()
+
+
+
+
+
+        return None
+
+
+    def ask_for_vpc(self):
+        vpc_ids = self.list_vpcs()
+        create_choice = 'Create a new VPC ...'
+
+        if vpc_ids:
+            choices = []
+
+            current_vpc_choice = None
+            if self.vpc_id and (self.vpc_id in vpc_ids):
+                current_vpc_choice = self.vpc_id + ' (current)'                
+                choices.append(current_vpc_choice)
+                vpc_ids.remove(self.vpc_id)
+                choices += vpc_ids
+            else:
+                choices += vpc_ids
+
+            choices.append(create_choice)
+
+            vpc_id = questionary.select("Which VPC do you want to use?", choices=choices).ask()
+
+            if vpc_id is None:
+                return None
+                
+            if vpc_id != create_choice:
+                if vpc_id != current_vpc_choice:                
+                    self.vpc_id = vpc_id
+                    self.save()
+                return vpc_id
+        else:
+            rv = questionary.confirm('Create a new VPC?').ask()
+
+            if not rv:
+                return None
+
+        return self.create_vpc()
+
+    def create_vpc(self):
+        print('To create a VPC, a CIDR block is required for IP addresses in the VPC.')
+        print('For more information, see https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Subnets.html')
+
+        default_cidr_block = self.vpc_cidr_block or '10.0.0.0/16'
+        q = f"What do you want to use as the IP4 CIDR block? [{default_cidr_block}]"
+
+        cidr_block = questionary.text(q).ask()
+
+        if cidr_block is None:
+            return None
+
+        cidr_block = cidr_block or default_cidr_block
+
+        # TODO: validate cidr block
+
+        ec2_client = self.make_boto_client('ec2')
+
+        if not ec2_client:
+            print("Can't access EC2 service, please check your AWS credentials and permissions")
+            return None
+
+        resp = None
+        try:
+            resp = ec2_client.create_vpc(CidrBlock=cidr_block,
+                    AmazonProvidedIpv6CidrBlock=True)
+        except Exception as ex:
+            ex_str = str(ex)
+            if ex_str.find('Unauthorized') >= 0:
+                print("The AWS credentials you are using don't have permission to create a VPC. Please use different credentials or upgrade your permissions.")
+            else:
+                print(f"Failed to create VPC. Got exception: '{ex_str}'")
+            return None
+
+        self.vpc_id = resp['Vpc']['VpcId']
+        self.vpc_cidr_block = cidr_block
+        self.save()
+
+        print(f"Successfully created VPC {self.vpc_id} in region {self.aws_region}.")
+
+        return self.vpc_id
+
+    def ask_for_subnets_in_vpc(self) -> Optional[List[str]]:
+        available_subnets = self.list_subnets()
+
+        if available_subnets is None:
+            return None
+
+        if len(available_subnets) == 0:
+            # TODO
+            return None
+        else:
+            selected_subnets = []
+            done_choice = 'Done selecting subnets'
+
+            choices = [done_choice]
+
+            for subnet in available_subnets:
+                arn = subnet['SubnetArn']
+                subnet_id = arn[(arn.rfind('/') + 1):]
+                subnet_name = None
+                tags = subnet['Tags'] or []
+                for tag in tags:
+                    if tag['Key'] == 'Name':
+                        subnet_name = tag['Value']
+                choice_parts = [subnet_id]
+                
+                if subnet_name:
+                  choice_parts.append(subnet_name)
+
+                choice_parts += [subnet['CidrBlock'], subnet['AvailabilityZone']]
+                choices.append(' | '.join(choice_parts))
+
+            while True:
+                rv = questionary.select('Choose a subnet to add:', choices=choices).ask()
+                if rv is None:
+                    print("Skipping subnets for now.")
+                    return None
+
+                if rv == done_choice:
+                    self.subnets = []
+
+                    for subnet_choice in selected_subnets:
+                        space_index = subnet_choice.find(' ')
+                        self.subnets.append(subnet_choice[0:space_index])
+
+                    print(f"Using subnets {self.list_to_string(self.subnets)}")
+                    self.save()
+                    return self.subnets
+
+                selected_subnets.append(rv)
+                choices.remove(rv)
+                print(f"Selected subnets so far: {self.list_to_string(selected_subnets)}")
+
+    def ask_for_security_groups_in_vpc(self) -> Optional[List[str]]:
+        available_security_groups = self.list_security_groups()
+
+        if available_security_groups is None:
+            return None
+
+        if len(available_security_groups) == 0:
+            # TODO
+            return None
+        else:
+            selected_security_groups = []
+            done_choice = 'Done selecting security groups'
+            choices = [done_choice] + [f"{sg['GroupId']} ({sg['GroupName']})" for sg in available_security_groups]
+
+            while True:
+                rv = questionary.select('Choose a security group to add:', choices=choices).ask()
+                if rv is None:
+                    print("Skipping security groups for now.")
+                    return None
+
+                if rv == done_choice:
+                    self.security_groups = selected_security_groups
+                    print(f"Using security groups {self.list_to_string(self.security_groups)}")
+                    self.save()
+                    return self.security_groups
+
+                space_index = rv.find(' ')
+                security_group_id = rv[0:space_index]
+
+                selected_security_groups.append(security_group_id)
+                choices.remove(rv)
+                print(f"Selected security_groups so far: {self.list_to_string(selected_security_groups)}")
+
+    def ask_for_api_key(self):
+        q = "What is your CloudReactor API key?"
+
+        old_api_key = self.api_key
+        if old_api_key:
+            q += f" [{old_api_key}]"
+
+        self.api_key = questionary.text(q).ask() or old_api_key
+
+        if not self.api_key:
+            print("Skipping CloudReactor API key for now.")
+            return None
+
+        print()
+
+        existing_run_environments = self.list_run_environments()
+
+        if existing_run_environments is None:
+            print(f"The CloudReactor API key '{self.api_key}' is not valid. Please check that it is correct.")
+            self.api_key = None
+        elif len(existing_run_environments) == 0:
+            print('No current Run Environments found. Please create a new one.')
+        else:
+            # Actually this is the number in the first page, but that should be sufficient
+            print(f"There are currently {len(existing_run_environments)} Run Environments in your organization:")
+
+            for run_environment in existing_run_environments:
+                print(run_environment['name'])
+
+            print('Your CloudReactor API key is valid.')
+
+        self.save()
+
+        return self.api_key
+
+    def make_default_run_environment_name(self):
+        if self.cluster_arn:
+            name = self.cluster_arn
+            slash_index = name.rfind('/')
+            if slash_index >= 0:
+                name = name[(slash_index + 1):]
+            return re.sub(r'[^A-Za-z-]+', '', name) or DEFAULT_RUN_ENVIRONMENT_NAME
+        return DEFAULT_RUN_ENVIRONMENT_NAME
+
+    def create_or_update_run_environment(self):
+        print("The CloudFormation template has been uploaded successfully.")
+        print("The final step is to create or update a Run Environment in CloudReactor with the corresponding settings.")
+
+        existing_run_environments = self.list_run_environments()
+
+        create_new_choice = 'Create a new Run Environment'
+        run_environment_uuid: str = None
+        run_environment_name: str = None
+        if existing_run_environments:            
+            choices = [run_environment['name'] for run_environment in existing_run_environments]
+            choices.append(create_new_choice)            
+            run_environment_name = questionary.select("Which Run Environment do you want to update?", choices=choices).ask()
+            if run_environment_name is None:
+                return None
+
+            if run_environment_name != create_new_choice:
+                run_environment_uuid = [run_environment['uuid'] for run_environment \
+                    in existing_run_environments if run_environment['name'] == run_environment_name][0]
+            
+        if not run_environment_uuid:
+            q = 'What do you want to name your Run Environment? Common names are "staging" or "production".'            
+            run_environment_name = questionary.text(q).ask()
+            if not run_environment_name:
+                return None
+
+        http_method = 'POST'
+        url = CLOUDREACTOR_API_BASE_URL + '/api/v1/run_environments/'
+
+        if run_environment_uuid:
+            print(f"Updating Run Environment '{run_environment_name}' ...\n")
+            http_method = 'PATCH'
+            url += (run_environment_uuid + '/')
+        else:    
+            print(f"Creating Run Environment '{run_environment_name}'.\n")
+               
+        ecs_caps = {
+            'type': 'AWS ECS',
+            'default_launch_type': 'FARGATE',
+            'supported_launch_types': ['FARGATE'],
+            'default_cluster_arn': self.cluster_arn,
+            'default_execution_role': self.task_execution_role_arn,
+        }
+
+        if self.subnets:
+            ecs_caps['default_subnets'] = self.subnets
+
+        if self.security_groups:
+            ecs_caps['default_security_groups'] = self.security_groups
+
+        data = {
+            'name': run_environment_name,
+            'aws_account_id': self.aws_account_id,
+            'aws_default_region': self.aws_region,
+            'aws_assumed_role_external_id': self.external_id,
+            'aws_workflow_starter_access_key': self.workflow_starter_access_key,
+            'aws_events_role_arn': self.assumable_role_arn,
+            'aws_workflow_starter_lambda_arn': self.workflow_starter_arn,
+            'execution_method_capabilities': [ecs_caps]
+        }
+
+        response_ok = False
+        response_status = None
+        response_body = None
+        saved_run_environment = None
+
+        try:
+            http = urllib3.PoolManager()
+            r = http.request(http_method, url,
+                             body=json.dumps(data),
+                             headers={
+                                 'Authorization': f"Token {self.api_key}",
+                                 'Accept': 'application/json',
+                                 'Content-Type': 'application/json'
+                             }, timeout=10.0)
+
+            response_status = r.status
+
+            response_body = r.data.decode('utf-8')
+            saved_run_environment = json.loads(response_body)
+
+            response_ok = (response_status >= 200) and (response_status < 300)
+        except urllib3.exceptions.HTTPError as http_error:
+            print(f"An error communicating with cloudreactor.io occurred: {http_error}")
+
+        if response_ok:
+            self.saved_run_environment_uuid = saved_run_environment.get('uuid')
+
+            if not self.saved_run_environment_uuid:
+                print('The Run Environment creation/update response was invalid. ' + HELP_MESSAGE)
+                return False
+
+            self.saved_run_environment_name = saved_run_environment['name']
+            self.save()
+            return True
+        else:
+            print(f"An error occurred creating the Run Environment.")
+
+            if response_body:
+                print(f"Got response status {response_status} and response body: {response_body} from the server")
+            else:
+                print(f"Got response status {response_status} from the server")
+
+        print()
+        return False
+
     def handle_run_environment_saved(self):
-        print(f"The Run Environment '{self.run_environment_name}' was created successfully.\n")
+        action = 'updated' if self.saved_run_environment_uuid else 'created'
+        print(f"The Run Environment '{self.saved_run_environment_name}' was {action} successfully.\n")
         print("Congratulations, you've completed all the steps to setup your AWS environment!\n")
         print("You can view your new Run Environment at " + self.make_run_environment_url())
-        print("You may optionally add default subnets and security groups there.\n")
+
+        if not self.subnets or not self.security_groups:
+            print("You may optionally add default subnets and security groups there.")
+
+        print()    
 
         choices = [
-            '1. Create another Run Environment',
+            '1. Create or update another Run Environment',
             '2. Reset all settings and start over',
             '3. Quit'
         ]
@@ -954,10 +1247,13 @@ class Wizard(object):
 
         if number == 1:
             self.mode = Wizard.MODE_INTERVIEW
-            self.run_environment_name = None
+            self.saved_run_environment_name = None
             self.saved_run_environment_uuid = None
+            self.vpc_id = None
+            self.subnets = None
+            self.security_groups = None
             self.save()
-            return self.ask_for_run_environment_name()
+            return True
         elif number == 2:
             self.mode = Wizard.MODE_INTERVIEW
             self.reset()
@@ -972,8 +1268,21 @@ class Wizard(object):
         if self.saved_run_environment_uuid is None:
             return None
 
-        return "https://dash.cloudreactor.io/run_environments/" + \
+        host_qualifier = ''
+        if self.deployment_environment != 'production':
+            host_qualifier = '.' + self.deployment_environment            
+
+        return f"https://dash{host_qualifier}.cloudreactor.io/run_environments/" + \
                 urllib.parse.quote(self.saved_run_environment_uuid)
+
+    def make_cloudformation_role_template_url(self):
+        host_qualifier = ''
+        file_qualifier = ''
+        if self.deployment_environment != 'production':
+            host_qualifier = '-' + self.deployment_environment
+            file_qualifier = '.' + self.deployment_environment
+
+        return f"https://cloudreactor-customer-setup{host_qualifier}.s3-us-west-2.amazonaws.com/cloudreactor-aws-role-template{file_qualifier}.json"
 
     def make_boto_client(self, service_name: str):
         if self.aws_access_key and self.aws_secret_key:
@@ -985,11 +1294,20 @@ class Wizard(object):
         # TODO: use default credentials
         return None
 
-    def generate_random_key(self):
+    def generate_random_key(self) -> str:
         return ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(KEY_LENGTH))
 
+    def list_to_string(self, arr) -> str:
+        if arr is None:
+            return UNSET_STRING
+
+        if len(arr) == 0:
+            return EMPTY_LIST_STRING
+
+        return '(' + ', '.join(arr) + ')'
+
     def list_stacks(self, cf_client=None):
-        print(f"Checking for existing CloudFormation stacks in region {self.aws_region} ...")
+        print(f"Looking for existing CloudFormation stacks in region {self.aws_region} ...")
 
         if not cf_client:
             cf_client = self.make_boto_client('cloudformation')
@@ -1002,7 +1320,7 @@ class Wizard(object):
         try:
             resp = cf_client.list_stacks()
         except Exception as ex:
-            logger.warning(f"Failed to list stacks: {ex}")
+            logging.warning(f"Failed to list stacks: {ex}")
             print('We could not determine your existing CloudFormation stacks. Please check your AWS credentials and permissions.')
             return None
 
@@ -1022,7 +1340,136 @@ class Wizard(object):
                     'status': status
                 })
 
+        print(f"Found {len(existing_stacks)} existing CloudFormation stack(s) in region {self.aws_region}.")
+
         return existing_stacks
+
+    def list_vpcs(self):
+        print(f"Looking for existing VPCs in region {self.aws_region} ...")
+
+        ec2_client = self.make_boto_client('ec2')
+
+        resp = None
+        try:
+            resp = ec2_client.describe_vpcs(MaxResults=100)
+        except Exception as ex:
+            logging.warning(f"Failed to list VPCs: {ex}")
+            print('We could not determine your existing VPCs. Please check your AWS credentials and permissions.')
+            return None
+
+        vpcs = resp['Vpcs']
+        print(f"Found {len(vpcs)} VPC(s) in region {self.aws_region}.")
+        return [vpc['VpcId'] for vpc in vpcs]
+
+    def list_subnets(self):
+        if not self.vpc_id:
+            logging.error("list_subnets() called without a VPC")
+            return None
+
+        print(f"Looking for existing subnets in VPC {self.vpc_id} ...")
+
+        ec2_client = self.make_boto_client('ec2')
+
+        resp = None
+        try:
+            resp = ec2_client.describe_subnets(
+                Filters=[
+                    {
+                        'Name': 'vpc-id',
+                        'Values': [
+                            self.vpc_id,
+                        ]
+                    },
+                ],
+                MaxResults=100)
+        except Exception as ex:
+            logging.warning(f"Failed to list subnets: {ex}")
+            print('We could not determine your existing subnets. Please check your AWS credentials and permissions.')
+            return None
+
+        print(f"subnets response = {resp}")
+
+        subnets = resp['Subnets']
+        subnet_count = len(subnets)
+        print(f"Found {subnet_count} subnet(s) in VPC {self.vpc_id}.")
+
+        if subnet_count == 100:
+            print("Warning: more than 100 subnets found, only listing the first 100.")
+        
+        return subnets
+
+    def list_security_groups(self):
+        if not self.vpc_id:
+            logging.error("list_security_groups() called without a VPC")
+            return None
+
+        print(f"Looking for existing security_groups in VPC {self.vpc_id} ...")
+
+        ec2_client = self.make_boto_client('ec2')
+
+        resp = None
+        try:
+            resp = ec2_client.describe_security_groups(
+                Filters=[
+                    {
+                        'Name': 'vpc-id',
+                        'Values': [
+                            self.vpc_id,
+                        ]
+                    },
+                ],
+                MaxResults=100)
+        except Exception as ex:
+            logging.warning(f"Failed to list security_groups: {ex}")
+            print('We could not determine your existing security_groups. Please check your AWS credentials and permissions.')
+            return None
+
+        security_groups = resp['SecurityGroups']
+        security_group_count = len(security_groups)
+        print(f"Found {security_group_count} security_group(s) in VPC {self.vpc_id}.")
+
+        if security_group_count == 100:
+            print("Warning: more than 100 security_groups found, only listing the first 100.")
+
+        # Return the raw response data    
+        return security_groups
+
+    def list_run_environments(self):
+        if not self.api_key:
+            logging.error("API key not set, can't list Run Environments")
+            return None
+
+        response_ok = False
+        response_status = None
+        response_body = None
+        page = None
+
+        try:
+            http = urllib3.PoolManager()
+            r = http.request('GET', CLOUDREACTOR_API_BASE_URL + '/api/v1/run_environments/',
+                             headers={
+                                 'Authorization': f"Token {self.api_key}",
+                                 'Accept': 'application/json'
+                             }, timeout=10.0)
+
+            response_status = r.status
+
+            response_body = r.data.decode('utf-8')
+            page = json.loads(response_body)
+
+            response_ok = response_status == 200
+        except urllib3.exceptions.HTTPError as http_error:
+            print(f"An error communicating with cloudreactor.io occurred: {http_error}")
+
+        if response_ok:
+            return page['results']
+        else:            
+            if response_body:
+                print(f"Got response status {response_status} and response body: {response_body} from the server")
+            else:
+                print(f"Got response status {response_status} from the server")
+
+        return None
 
 
 if __name__ == '__main__':
@@ -1035,7 +1482,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    deployment_environment = args.environment
+    deployment_environment = args.environment or 'production'
 
     log_level = (args.log_level or os.environ.get('WIZARD_LOG_LEVEL', DEFAULT_LOG_LEVEL)).upper()
     numeric_log_level = getattr(logging, log_level, None)
@@ -1063,6 +1510,7 @@ if __name__ == '__main__':
         try:
             with open(SAVED_STATE_FILENAME) as f:
                 wizard = jsonpickle.decode(f.read())
+                wizard.set_deployment_environment(deployment_environment)
         except Exception as ex:
             print("Couldn't read save file, starting over. Sorry about that!")
     else:
