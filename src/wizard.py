@@ -15,7 +15,8 @@ import jsonpickle
 import urllib3
 import boto3
 import questionary
-import jinja2
+from jinja2 import Environment, FileSystemLoader
+import yaml
 
 DEFAULT_LOG_LEVEL = 'ERROR'
 SAVED_STATE_FILENAME = 'saved_settings.json'
@@ -69,8 +70,6 @@ CLOUDFORMATION_SUCCESSFUL_STATUSES = set([
 
 CLOUDREACTOR_API_BASE_URL = os.environ.get('CLOUDREACTOR_API_BASE_URL', 'https://api.cloudreactor.io')
 
-DEFAULT_IP4_CIDR_BLOCK = '10.0.0.0/16'
-
 def print_banner():
     with open('banner.txt') as f:
         print(f.read())
@@ -85,9 +84,9 @@ class Wizard(object):
         '2': ['aws_access_key', 'AWS access key'],
         '3': ['aws_secret_key', 'AWS secret key'],        
         '4': ['cluster_arn', 'AWS ECS Cluster'],
-        '5': ['subnets', 'Subnets'],
-        '6': ['security_groups', 'Security groups'],
-        '7': ['stack_name', 'CloudFormation stack name'],
+        '5': ['subnets', 'Subnet(s)'],
+        '6': ['security_groups', 'Security group(s)'],
+        '7': ['stack_name', 'CloudReactor permissions CloudFormation stack name'],
         '8': ['api_key', 'CloudReactor API key'],    
     }
 
@@ -98,9 +97,9 @@ class Wizard(object):
         self.aws_secret_key = None
         self.aws_account_id = None
         self.available_cluster_arns = None
-        self.cluster_arn = None
-        self.vpc_cidr_block = None
+        self.cluster_arn = None        
         self.vpc_id = None
+        self.was_vpc_created_by_wizard = None
         self.subnets = None
         self.security_groups = None
         self.api_key = None
@@ -137,9 +136,9 @@ class Wizard(object):
     def clear_aws_state(self):
         self.aws_account_id = None
         self.available_cluster_arns = None
-        self.cluster_arn = None
-        self.vpc_cidr_block = None
+        self.cluster_arn = None        
         self.vpc_id = None
+        self.was_vpc_created_by_wizard = None
         self.subnets = None
         self.security_groups = None
         self.clear_stack_upload_state()
@@ -164,6 +163,7 @@ class Wizard(object):
     def print_menu(self):
         for choice in self.make_property_choices():
             print(choice)
+        print()
 
     def make_property_choices(self):
         choices = []
@@ -188,12 +188,9 @@ class Wizard(object):
         while not finished:
             rv = None
             if self.saved_run_environment_uuid:
-                self.handle_run_environment_saved()
-            elif self.uploaded_stack_id:
-                if self.stack_upload_finished_at:
-                    rv = self.handle_stack_upload_finished()
-                else:
-                    rv = self.wait_for_stack_upload()    
+                rv = self.handle_run_environment_saved()
+            elif self.uploaded_stack_id and not self.stack_upload_finished_at:
+                rv = self.wait_for_role_stack_upload()    
 
             if rv is None:
                 self.print_menu()
@@ -217,6 +214,10 @@ class Wizard(object):
                     else:
                         proceed = self.edit()
 
+                        if proceed and self.are_all_properties_set():
+                            if self.handle_all_settings_entered():
+                                proceed = False
+
     def interview(self):
         property_count = len(Wizard.NUMBER_TO_PROPERTY)
         for i in range(property_count):
@@ -228,11 +229,16 @@ class Wizard(object):
                 if rv is None:
                     return None
 
+        self.handle_all_settings_entered()
+
+        return None
+
+    def handle_all_settings_entered(self):
         rv = questionary.confirm("All settings have been entered. Proceed with CloudReactor setup?").ask()
 
         # TODO: check saved state in case we uploaded already
         if rv:
-            self.create_or_update_run_environment()
+            return self.create_or_update_run_environment()
 
         return None
 
@@ -263,6 +269,16 @@ class Wizard(object):
 
         return self.edit_property(number)
 
+    def are_all_properties_set(self):
+        property_count = len(Wizard.NUMBER_TO_PROPERTY)
+        for i in range(property_count):
+            n = i + 1
+            arr = Wizard.NUMBER_TO_PROPERTY[str(n)]
+
+            if self.__dict__[arr[0]] is None:
+                return False
+        return True                
+
     def edit_property(self, n):
         arr = Wizard.NUMBER_TO_PROPERTY[str(n)]
         p = arr[0]
@@ -274,7 +290,7 @@ class Wizard(object):
         elif p == 'aws_secret_key':
             return self.ask_for_aws_secret_key()
         elif p == 'stack_name':
-            return self.ask_for_stack_name()
+            return self.ask_for_role_stack_name_and_upload()
         elif p == 'subnets':
             return self.ask_for_subnets()
         elif p == 'security_groups':
@@ -301,12 +317,12 @@ class Wizard(object):
             choices=choices).ask()
 
         if self.aws_region is None:
-            print("Skipping AWS region for now.")
+            print("Skipping AWS region for now.\n")
             return None
 
         self.aws_region = self.aws_region.replace(DEFAULT_SUFFIX, '')
 
-        print(f"Using AWS region {wizard.aws_region}.")
+        print(f"Using AWS region {wizard.aws_region}.\n")
 
         if old_aws_region != self.aws_region:
             self.clear_aws_state()
@@ -315,8 +331,22 @@ class Wizard(object):
         return self.aws_region
 
     def ask_for_aws_access_key(self):
+        print("To allow this wizard to create AWS resources for you, it needs an AWS access key.")
+        print("The access key needs to be associated with a user that has the following permissions:")
+        print("- Upload CloudFormation stack")
+        print("- Create IAM Roles")
+        print("- List ECS clusters, VPCs, subnets, and security groups")
+        print("- Create ECS clusters (if using the wizard to create an ECS cluster)")        
+        print("- Create VPCs, subnets, internet gateways, and security groups (if using the wizard to create a VPC)")
+        print()
+        print("The access key and secret key are not sent to CloudReactor.")
+        print()
+
         old_aws_access_key = self.aws_access_key
-        q = 'What AWS access key do you want to use? Type "none" to use the default permissions on this machine.'
+       
+        # TODO
+        #q = 'What AWS access key do you want to use? Type "none" to use the default permissions on this machine.'
+        q = 'What is the AWS access key do you want to use for this wizard?'
 
         if old_aws_access_key:
             q += f" [{old_aws_access_key}]"
@@ -331,7 +361,9 @@ class Wizard(object):
 
     def ask_for_aws_secret_key(self):
         old_aws_secret_key = self.aws_secret_key
-        q = 'What AWS secret key do you want to use? Type "none" to use the default permissions on this machine.'
+        #TODO
+        #q = 'What AWS secret key do you want to use? Type "none" to use the default permissions on this machine.'
+        q = 'What is the AWS secret key corresponding to your AWS access key?'
 
         if old_aws_secret_key:
             q += f" [{old_aws_secret_key}]"
@@ -344,51 +376,94 @@ class Wizard(object):
         self.validate_aws_access()
         return self.aws_secret_key
 
-    def ask_for_stack_name(self):
-        print("To allow CloudReactor to run tasks on your behalf, you'll need to install an AWS CloudFormation template that grants CloudReactor permissions.")
+    def ask_for_role_stack_name_and_upload(self):
+        print("To allow CloudReactor to run tasks on your behalf, you'll need to install an AWS CloudFormation stack that grants CloudReactor permissions to control tasks.")
         print(f"To see the resources that will be added, please see {self.make_cloudformation_role_template_url()}")
 
         cf_client = self.make_boto_client('cloudformation')
 
         if not cf_client:
-            print("You must set your AWS credentials before installing a CloudFormation template.\n")
+            print("You must set your AWS credentials before installing a CloudFormation stack.\n")
             return None
 
-        existing_stacks = self.list_stacks(cf_client=cf_client)
-        existing_stack_names = [stack['name'] for stack in (existing_stacks or [])]
+        default_stack_name=self.make_default_role_stack_name()
+        if self.stack_name and (not self.uploaded_stack_id):
+            default_stack_name = self.stack_name
 
         old_uploaded_stack_name = None
         if self.uploaded_stack_id:
             old_uploaded_stack_name = self.stack_name
 
+        rv = self.ask_for_stack_name(
+            default_stack_name=default_stack_name,
+            old_uploaded_stack_name=old_uploaded_stack_name,
+            create_or_update_message="If you've never set up CloudReactor before, you should install a new CloudFormation stack.",
+            purpose=' to grant CloudReactor permissions to control tasks',
+            cf_client=cf_client
+        )
+
+        if rv is None:
+            print("Skipping stack name for now.\n")
+            return None
+
+        self.stack_name, self.stack_id_to_update, reuse_stack = rv
+        self.uploaded_stack_id = None
+
+        self.save()
+                
+        if (not reuse_stack) and (self.uploaded_stack_id is None):
+            rv = self.start_role_cloudformation_template_upload(cf_client=cf_client)
+            if not rv:
+                return None
+
+        if self.uploaded_stack_id and not self.stack_upload_finished_at:
+            rv = self.wait_for_role_stack_upload(cf_client=cf_client)
+
+            if rv:
+                print(f"The CloudFormation stack installation was successful.")
+                return rv
+
+            return None
+        else:
+            return self.uploaded_stack_id            
+
+
+    def ask_for_stack_name(self, default_stack_name, old_uploaded_stack_name, 
+        create_or_update_message, purpose, cf_client=None):
+        if not cf_client:
+            cf_client = self.make_boto_client('cloudformation')
+
+        if not cf_client:
+            print("You must set your AWS credentials before installing a CloudFormation stack.\n")
+            return None
+
+        existing_stacks = self.list_stacks(cf_client=cf_client)
+        existing_stack_names = [stack['name'] for stack in (existing_stacks or [])]
+
         should_create = True
         if len(existing_stack_names) > 0:
             print()
-            print("If you've never set up CloudReactor before, you should install a new CloudFormation stack.")
+
+            if create_or_update_message:
+                print(create_or_update_message)
+
             selection = questionary.select(
-                'Do you want to install a new CloudFormation stack or update and use an existing one?',
+                f'Do you want to install a new CloudFormation stack{purpose} or update and use an existing one?',
                 choices=['Install a new stack', 'Update and use an existing stack']).ask()
 
             if selection is None:
-                print("Skipping stack name for now.\n")
                 return None
 
             should_create = (selection.find('new') >= 0)
 
         if should_create:
-            default_stack_name = self.make_default_stack_name()
-
-            if self.stack_name and (not self.uploaded_stack_id):
-                default_stack_name = self.stack_name
-
-            good_stack_name = False
+            good_stack_name = None
             reuse_stack = False
             while not good_stack_name:
                 stack_name = questionary.text(
-                    f"What do you want to name the CloudFormation stack? [{default_stack_name}]").ask()
+                    f"What do you want to name the CloudFormation stack{purpose}? [{default_stack_name}]").ask()
 
                 if stack_name is None:
-                    print("Skipping stack name for now.\n")
                     return None
 
                 if not stack_name:
@@ -396,26 +471,22 @@ class Wizard(object):
 
                 if old_uploaded_stack_name and (stack_name == old_uploaded_stack_name):
                     print(f"Reusing previously installed stack '{stack_name}'.")
-                    good_stack_name = True
+                    good_stack_name = stack_name
                     reuse_stack = True
                 elif stack_name in existing_stack_names:
-                    print(f"The name '{self.stack_name}' conflicts with an existing stack name. Please choose another name.")
-                elif CLOUDFORMATION_STACK_NAME_REGEX.fullmatch(self.stack_name) is None:
+                    print(f"The name '{stack_name}' conflicts with an existing stack name. Please choose another name.")
+                elif CLOUDFORMATION_STACK_NAME_REGEX.fullmatch(stack_name) is None:
                     print(f"'{stack_name}' is not a valid CloudFormation stack name. Stack names can only contain alphanumeric characters and dashes, no underscores.")
                 else:
-                    good_stack_name = True
-                    self.stack_name = stack_name
+                    print(f"New stack will be named '{stack_name}'.\n")
+                    good_stack_name = stack_name
 
-            if not reuse_stack:
-                self.uploaded_stack_id = None
-                self.stack_id_to_update = None
-                print(f"Stack will be named '{self.stack_name}'.\n")
+            return stack_name, None, reuse_stack
         else:
             stack_name = questionary.select("Which CloudFormation stack do you want to update and use?",
                                             choices=existing_stack_names).ask()
 
             if stack_name is None:
-                print("Skipping stack selection for now.\n")
                 return None
 
             selected_stack = None
@@ -434,32 +505,12 @@ class Wizard(object):
                 self.uploaded_stack_id = None
                 return None
 
-            self.stack_name = stack_name
-            self.uploaded_stack_id = None
-            self.stack_id_to_update = selected_stack['stack_id']
-
-        self.save()
-
-        if self.uploaded_stack_id is None:
-            rv = self.start_cloudformation_template_upload(cf_client=cf_client)
-            if not rv:
-                return None
-
-        if self.uploaded_stack_id and not self.stack_upload_finished_at:
-            rv = self.wait_for_stack_upload(cf_client=cf_client)
-
-            if rv:
-                print(f"The CloudFormation stack installation was successful.")
-                return rv
-
-            return None
-        else:
-            return self.uploaded_stack_id
-
-    def make_default_stack_name(self):
+            return stack_name, selected_stack['stack_id'], False
+       
+    def make_default_role_stack_name(self):
         name = 'CloudReactor'
 
-        if self.deployment_environment:
+        if self.deployment_environment and (self.deployment_environment != 'production'):
             name += f"_{deployment_environment}"
 
         return name
@@ -509,7 +560,7 @@ class Wizard(object):
             resp = ecs_client.list_clusters(maxResults=100)
             self.available_cluster_arns = resp['clusterArns']
             self.save()
-        except Exception as ex:
+        except Exception:
             logging.warning("Can't list clusters", exc_info=True)
 
         if (self.available_cluster_arns is None) or (len(self.available_cluster_arns) == 0):
@@ -581,15 +632,14 @@ class Wizard(object):
             print(f"Failed to create ECS cluster: {ex}")
             return None
 
-    def start_cloudformation_template_upload(self, cf_client=None):
+    def start_role_cloudformation_template_upload(self, cf_client=None):
         if not cf_client:
             cf_client = self.make_boto_client('cloudformation')
 
         if not cf_client:
-            print("You must set your AWS credentials before installing a CloudFormation template.\n")
+            print("You must set your AWS credentials before installing a CloudFormation stack.\n")
             return None
 
-        # TODO: update stack
         self.stack_upload_started_at = datetime.now()
 
         try:
@@ -644,27 +694,25 @@ class Wizard(object):
                 return self.uploaded_stack_id
             else:
                 logging.warning("Failed to install stack", exc_info=True)
-                print(f"Failed to install stack: {ex}")
+                print(f"Failed to install stack: {ex}")                
 
-                exception_str = str(ex)
-
-                if exception_str.find('AlreadyExistsException'):
+                if ex_str.find('AlreadyExistsException'):
                     rv = questionary.confirm(f"That stack already exists. Delete it?").ask()
 
                     if rv:
-                        self.delete_stack(cf_client)
+                        self.delete_role_stack(cf_client)
 
                 self.clear_stack_upload_state()
                 return None
 
         self.save()
 
-        print(f"Started CloudFormation template installation for stack '{self.stack_name}', stack ID is {self.uploaded_stack_id}.")
+        print(f"Started CloudFormation role template installation for stack '{self.stack_name}', stack ID is {self.uploaded_stack_id}.")
         return self.uploaded_stack_id
 
-    def wait_for_stack_upload(self, cf_client=None):
+    def wait_for_role_stack_upload(self, cf_client=None):
         if not self.uploaded_stack_id:
-            logging.error("wait_for_stack_upload() called but, but no stack ID was saved.")
+            logging.error("wait_for_role_stack_upload() called but, but no stack ID was saved.")
             return False
 
         if not cf_client:
@@ -674,16 +722,117 @@ class Wizard(object):
             print("Your AWS credentials are invalid. Please check them and try again.\n")
             return None
 
-        done = False
+        stack = self.wait_for_stack_upload(self.uploaded_stack_id, 
+            self.stack_name, cf_client)
 
-        while not done:
+        if stack is None:
+            return None
+
+        self.stack_upload_finished_at = datetime.now()        
+        self.stack_upload_status = stack['StackStatus']
+
+        if self.stack_upload_status in CLOUDFORMATION_SUCCESSFUL_STATUSES:
+            outputs = stack['Outputs'] or []
+
+            for output in outputs:
+                output_key = output['OutputKey']
+                output_value = output['OutputValue']
+                if output_key == 'CloudreactorRoleARN':
+                    self.assumable_role_arn = output_value
+                elif output_key == 'TaskExecutionRoleARN':
+                    self.task_execution_role_arn = output_value
+                elif output_key == 'WorkflowStarterARN':
+                    self.workflow_starter_arn = output_value
+                else:
+                    logging.warning(f"Got unknown output '{output_key}' with value '{output_value}'.")
+
+            params = stack['Parameters'] or []
+
+            for param in params:
+                param_key = param['ParameterKey']
+                param_value = param['ParameterValue']
+
+                if param_key == 'ExternalID':
+                    self.external_id = param_value
+                elif param_key == 'WorkflowStarterAccessKey':
+                    self.workflow_starter_access_key = param_value
+
+            if self.external_id and self.workflow_starter_access_key and \
+                    self.assumable_role_arn and self.task_execution_role_arn and \
+                    self.workflow_starter_arn:
+                self.stack_upload_succeeded = True
+                self.save()
+                return True
+
+            print('Something was missing from the stack output. ' + HELP_MESSAGE + '\n')
+            self.stack_upload_succeeded = False
+            self.save()
+            return None
+        else:
+            self.stack_upload_status_reason = stack.get('StackStatusReason')            
+            self.stack_upload_succeeded = False
+            self.save()
+
+            print(f"The CloudReactor permissions stack upload failed with status '{self.stack_upload_status}' and status reason '{self.stack_upload_status_reason}'.")
+            return None
+
+    def wait_for_vpc_stack_upload(self, vpc_stack_id: str,  vpc_stack_name: str,
+        cf_client):
+        if not vpc_stack_id:
+            logging.error("wait_for_vpc_stack_upload() called but, but no vpc_stack_id was specified.")
+            return False
+
+        stack = self.wait_for_stack_upload(vpc_stack_id, 
+            vpc_stack_name, cf_client)
+
+        if stack is None:
+            return None
+
+        stack_upload_status = stack['StackStatus']
+
+        if stack_upload_status in CLOUDFORMATION_SUCCESSFUL_STATUSES:
+            outputs = stack['Outputs'] or []
+            self.subnets = []
+            # TODO add security groups            
+
+            for output in outputs:
+                output_key = output['OutputKey']
+                output_value = output['OutputValue']
+                if output_key == 'VPC':                    
+                    self.vpc_id = output_value
+                    logging.debug(f"Got VPC {self.vpc_id} from stack output")
+                elif output_key == 'SubnetsPrivate':
+                    self.subnets = output_value.split(',')
+                    logging.debug(f"Got subnets {self.subnets} from stack output")
+                elif output_key == 'DefaultTaskSecurityGroup':
+                    logging.debug(f"Got security group {output_value} from stack output")
+                    self.security_groups = [output_value]
+                else:
+                    logging.debug(f"Got output '{output_key}' with value '{output_value}'.")                    
+
+            if self.vpc_id and self.subnets and self.security_groups:       
+                self.was_vpc_created_by_wizard = True
+                self.save()         
+                return self.vpc_id
+
+            print('Something was missing from the stack output. ' + HELP_MESSAGE + '\n')
+            return None
+        else:
+            stack_upload_status_reason = stack['StackStatusReason']
+            print(f"The VPC stack upload failed with status '{stack_upload_status}' and status reason '{stack_upload_status_reason}'.")
+            return None
+
+
+    def wait_for_stack_upload(self, stack_id, stack_name, cf_client):
+        while True:
             resp = None
             try:
                 resp = cf_client.describe_stacks(
-                    StackName=self.uploaded_stack_id
+                    StackName=stack_id
                 )
-            except Exception as ex:
-                logging.warning("Can't describe CloudFormation stacks, re-creating client ...")
+            except Exception:
+                logging.warning("Can't describe CloudFormation stacks, re-creating client ...", 
+                    exc_info=True)
                 time.sleep(10)
                 cf_client = self.make_boto_client('cloudformation')
 
@@ -691,9 +840,7 @@ class Wizard(object):
                 stacks = resp['Stacks']
 
                 if len(stacks) == 0:
-                    print(f"CloudFormation stack '{self.stack_name}' was deleted, please check your settings and try again.\n")
-                    self.uploaded_stack_id = None
-                    self.save()
+                    print(f"CloudFormation stack '{stack_name}' was deleted, please check your settings and try again.\n")
                     return None
 
                 stack = stacks[0]
@@ -701,59 +848,14 @@ class Wizard(object):
 
                 if status in CLOUDFORMATION_IN_PROGRESS_STATUSES:
                     print(f"CloudFormation stack installation is still in progress ({status}). Waiting 10 seconds before checking again ...")
-                    time.sleep(10)
-                elif status in CLOUDFORMATION_SUCCESSFUL_STATUSES:
-                    self.stack_upload_finished_at = datetime.now()
-
-                    outputs = stack['Outputs'] or []
-
-                    for output in outputs:
-                        output_key = output['OutputKey']
-                        output_value = output['OutputValue']
-                        if output_key == 'CloudreactorRoleARN':
-                            self.assumable_role_arn = output_value
-                        elif output_key == 'TaskExecutionRoleARN':
-                            self.task_execution_role_arn = output_value
-                        elif output_key == 'WorkflowStarterARN':
-                            self.workflow_starter_arn = output_value
-                        else:
-                            logging.warning(f"Got unknown output '{output_key}' with value '{output_value}'.")
-
-                    params = stack['Parameters'] or []
-
-                    for param in params:
-                        param_key = param['ParameterKey']
-                        param_value = param['ParameterValue']
-
-                        if param_key == 'ExternalID':
-                            self.external_id = param_value
-                        elif param_key == 'WorkflowStarterAccessKey':
-                            self.workflow_starter_access_key = param_value
-
-                    if self.external_id and self.workflow_starter_access_key and \
-                            self.assumable_role_arn and self.task_execution_role_arn and \
-                            self.workflow_starter_arn:
-                        self.stack_upload_status = status
-                        self.stack_upload_succeeded = True
-                        self.save()
-                        return True
-
-                    print('Something was missing from the stack output. ' + HELP_MESSAGE + '\n')
-                    self.stack_upload_succeeded = False
-                    self.save()
-                    return None
+                    time.sleep(10)                
                 else:
-                    self.stack_upload_status = status
-                    self.stack_upload_status_reason = stack.get('StackStatusReason')
-                    self.stack_upload_finished_at = datetime.now()
-                    self.stack_upload_succeeded = False
-                    self.save()
-                    return None
+                    return stack
 
-    def delete_stack(self, cf_client=None):
-        stack_id = self.uploaded_stack_id or self.stack_name
-        if not stack_id:
-            print("No CloudFormation stack found to delete.")
+
+    def delete_stack(self, stack_id_or_name, cf_client=None):
+        if not stack_id_or_name:
+            logging.error("stack_id_or_name is empty")
             return None
 
         if cf_client is None:
@@ -764,27 +866,41 @@ class Wizard(object):
             return None
 
         try:
-            cf_client.delete_stack(StackName=stack_id)
-            print(f"Stack '{stack_id}' was scheduled for deletion. It may take a few minutes before the stack is completely deleted.\n")
-            # TODO: wait for stack deletion
-            self.clear_stack_upload_state()
+            cf_client.delete_stack(StackName=stack_id_or_name)
+            print(f"Stack '{stack_id_or_name}' was scheduled for deletion. It may take a few minutes before the stack is completely deleted.\n")
             return True
         except Exception as ex:
             logging.warning("Can't delete stack", exc_info=True)
-            print(f"Can't delete CloudFormation stack '{self.uploaded_stack_id}', error = {ex}")
+            print(f"Can't delete CloudFormation stack '{stack_id_or_name}', error = {ex}")
             print("You can use the AWS Console to delete the CloudFormation stack manually. You can still use this wizard to install another CloudFormation stack with a different name.\n")
             return None
 
-    def handle_stack_upload_finished(self, cf_client=None):
+    def delete_role_stack(self, cf_client=None):
+        stack_id = self.uploaded_stack_id or self.stack_name
+        if not stack_id:
+            print("No CloudFormation stack found to delete.")
+            return None
+
+        if self.delete_stack(stack_id, cf_client):
+            self.clear_stack_upload_state()
+            return True
+
+        return None    
+
+    def handle_role_stack_upload_finished(self, cf_client=None):
         if self.stack_upload_succeeded:
-            print(f"The CloudFormation stack installation was successful.")
-            return self.create_or_update_run_environment()
+            print(f"The installation of the CloudFormation stack for CloudReactor permissions was successful.")
+
+            if self.api_key:
+                return self.create_or_update_run_environment()
+            else:
+                return True
         else:
             reason = self.stack_upload_status_reason or '(Unknown)'
-            print(f"CloudFormation stack installation failed with status '{self.stack_upload_status}' and reason '{reason}'.")
+            print(f"The installation of the CloudFormation stack for CloudReactor permissions failed with status '{self.stack_upload_status}' and reason '{reason}'.")
             rv = questionary.confirm('Do you want to delete the stack and try again?').ask()
             if rv:
-                self.delete_stack(cf_client)
+                self.delete_role_stack(cf_client)
 
             self.clear_stack_upload_state()
             return False
@@ -806,9 +922,9 @@ class Wizard(object):
             choices = ['Use previously entered subnets: ' + subnets_str]
 
         choices += [
-            'Create new subnets',
-            'Select existing subnets',
-            'Enter subnets manually',
+            'Create a new VPC which includes subnets',
+            'Select existing subnet(s)',
+            #'Enter subnets manually',
             'Skip subnets'
         ]
 
@@ -831,21 +947,25 @@ class Wizard(object):
         is_create = rv.startswith('Create')
         is_select = rv.startswith('Select')
 
-        if is_create or is_select:
-            rv = self.ask_for_vpc()
-            if not rv:
+        rv = None
+        if is_create:
+            rv = self.create_vpc()
+        elif is_select:
+            ec2_client = self.make_boto_client('ec2')            
+            if not ec2_client:
+                print("You need to specify your AWS credentials before selecting subnets.\n")
                 return None
 
-        if is_create:
-            print("Not implemented yet")
+            rv = self.ask_for_vpc(ec2_client)
+            
+        if not rv:
             return None
 
+        if is_create or self.was_vpc_created_by_wizard:
+            return self.subnets
+
         if is_select:
-            return self.ask_for_subnets_in_vpc()
-
-
-
-
+            return self.ask_for_subnets_in_vpc(ec2_client)
 
         return None
 
@@ -866,24 +986,24 @@ class Wizard(object):
             choices = ['Use previously entered security groups: ' + security_groups_str]
 
         choices += [
-            'Create a new security group',
-            'Select existing security groups',
-            'Enter security groups manually',
+            'Create a new VPC which includes a default security group',
+            'Select existing security group(s)',
+            #'Enter security groups manually',
             'Skip security groups'
         ]
 
-        rv = questionary.select('How would you like to specify security_groups?',
+        rv = questionary.select('How would you like to specify security groups?',
                                 choices=choices).ask()
 
         if rv is None:
             return None
 
         if rv.startswith('Use previous'):
-            print(f"Using previously entered security_groups {security_groups_str}.\n")
+            print(f"Using previously entered security groups {security_groups_str}.\n")
             return self.security_groups
 
         if rv.startswith('Skip'):
-            print('Skipping security_groups for now. You can add them manually later.\n')
+            print('Skipping security groups for now. You can add them manually later.\n')
             self.security_groups = []
             self.save()
             return self.security_groups
@@ -891,27 +1011,31 @@ class Wizard(object):
         is_create = rv.startswith('Create')
         is_select = rv.startswith('Select')
 
-        if is_create or is_select:
-            rv = self.ask_for_vpc()
-            if not rv:
-                return None
-
+        rv = None
+        ec2_client = None
         if is_create:
-            print("Not implemented yet")
+            rv = self.create_vpc()
+        elif is_select:
+            ec2_client = self.make_boto_client('ec2')            
+            if not ec2_client:
+                print("You need to specify your AWS credentials before selecting security groups.\n")
+                return None
+            rv = self.ask_for_vpc(ec2_client)
+            
+        if not rv:
             return None
 
+        if is_create or self.was_vpc_created_by_wizard:            
+            return self.security_groups
+
         if is_select:
-            return self.ask_for_security_groups_in_vpc()
-
-
-
-
+            return self.ask_for_security_groups_in_vpc(ec2_client)
 
         return None
 
 
-    def ask_for_vpc(self):
-        vpc_ids = self.list_vpcs()
+    def ask_for_vpc(self, ec2_client):
+        vpc_ids = self.list_vpcs(ec2_client)
         create_choice = 'Create a new VPC ...'
 
         if vpc_ids:
@@ -947,49 +1071,168 @@ class Wizard(object):
         return self.create_vpc()
 
     def create_vpc(self):
-        print('To create a VPC, a CIDR block is required for IP addresses in the VPC.')
-        print('For more information, see https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Subnets.html')
+        print('This wizard can create a VPC suitable for running ECS tasks, along with subnets and a security group.')
+        print('For more information, see https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Subnets.html\n')
 
-        default_cidr_block = self.vpc_cidr_block or '10.0.0.0/16'
-        q = f"What do you want to use as the IP4 CIDR block? [{default_cidr_block}]"
+        cf_client = self.make_boto_client('cloudformation')
 
-        cidr_block = questionary.text(q).ask()
-
-        if cidr_block is None:
+        if cf_client is None:
+            print("You must set your AWS credentials before creating a VPC.\n")
             return None
 
-        cidr_block = cidr_block or default_cidr_block
+        done = False   
+        num_zones = 2     
+        while not done:        
+            rv = questionary.text('How many availability zones do you want to use? [2]').ask()
 
-        # TODO: validate cidr block
+            if rv is None:
+                return None
 
-        ec2_client = self.make_boto_client('ec2')
+            num_zones = 2
+            if rv:
+                try:
+                    num_zones = int(rv)
+                except ValueError:
+                    print("The number of availability zones must be between 1 and 3.")
+                    continue
 
-        if not ec2_client:
-            print("Can't access EC2 service, please check your AWS credentials and permissions")
-            return None
-
-        resp = None
-        try:
-            resp = ec2_client.create_vpc(CidrBlock=cidr_block,
-                    AmazonProvidedIpv6CidrBlock=True)
-        except Exception as ex:
-            ex_str = str(ex)
-            if ex_str.find('Unauthorized') >= 0:
-                print("The AWS credentials you are using don't have permission to create a VPC. Please use different credentials or upgrade your permissions.")
+                if num_zones < 1 or num_zones > 3:
+                    print("The number of availability zones must be between 1 and 3.")
+                    continue
             else:
-                print(f"Failed to create VPC. Got exception: '{ex_str}'")
+                num_zones = 2
+
+            done = True
+
+        second_octet = 0
+        done = False
+        while not done:        
+            rv = questionary.text('The subnets will be in the range 10.[n].0.0/16. What should n be? [0]').ask()
+
+            if rv is None:
+                return None
+
+            second_octet = 0
+            if rv:
+                try:
+                    second_octet = int(rv)
+                except ValueError:
+                    print("n should be between 0 and 255.")
+                    continue
+
+                if second_octet < 0 or second_octet > 255:
+                    print("n should be between 0 and 255.")
+                    continue
+            else:
+                second_octet = 0
+
+            done = True
+
+        vpc_template = self.make_vpc_template(num_availability_zones=num_zones,
+            second_octet=second_octet)
+
+        logging.debug(f"vpc_template = {vpc_template}")
+
+        rv = self.ask_for_stack_name(
+            default_stack_name='ECS-VPC',
+            old_uploaded_stack_name=None,
+            create_or_update_message=None,
+            purpose=' to create a VPC',
+            cf_client=cf_client
+        )
+
+        if rv is None:
+            print("Skipping VPC creation for now.\n")
             return None
 
-        self.vpc_id = resp['Vpc']['VpcId']
-        self.vpc_cidr_block = cidr_block
-        self.save()
+        vpc_stack_name, vpc_stack_id_to_update, reuse_stack = rv
 
+        vpc_stack_id = vpc_stack_id_to_update
+        if not reuse_stack:
+            rv = self.start_vpc_cloudformation_template_upload(vpc_stack_name,
+                vpc_stack_id_to_update, vpc_template, cf_client)
+
+            if rv is None:
+                print("Can't create or update VPC CloudFormation stack.\n")
+                return None
+
+            vpc_stack_id = rv
+
+        if vpc_stack_id:
+            vpc_id = self.wait_for_vpc_stack_upload(vpc_stack_id, 
+                vpc_stack_name, cf_client)
+                            
+            if vpc_id is None:
+                print(f"Something was wrong with the VPC CloudFormation stack. {HELP_MESSAGE}\n")
+                return None
+        
         print(f"Successfully created VPC {self.vpc_id} in region {self.aws_region}.")
 
-        return self.vpc_id
+        return vpc_id
 
-    def ask_for_subnets_in_vpc(self) -> Optional[List[str]]:
-        available_subnets = self.list_subnets()
+    def make_vpc_template(self, num_availability_zones, second_octet) -> str:
+        env = Environment(
+            loader=FileSystemLoader('./templates/')
+        )
+
+        template = env.get_template('vpc.yml.j2')
+
+        data = {
+            'az_count': num_availability_zones,
+            'second_octet': second_octet,
+        }
+
+        return template.render(data)
+
+    def start_vpc_cloudformation_template_upload(self, vpc_stack_name: str, 
+        vpc_stack_id_to_update: str, vpc_template: str,
+        cf_client=None):
+        if not cf_client:
+            cf_client = self.make_boto_client('cloudformation')
+
+        if not cf_client:
+            print("Your AWS credentials are invalid. Please check them and try again.\n")
+            return None
+
+        try:
+            resp = None
+
+            if vpc_stack_id_to_update:
+                resp = cf_client.update_stack(
+                    StackName=vpc_stack_id_to_update,
+                    TemplateBody=vpc_template
+                )
+            else:    
+                resp = cf_client.create_stack(
+                    StackName=vpc_stack_name,
+                    TemplateBody=vpc_template
+                )
+
+            logging.debug('Got stack response:')
+            logging.debug(resp)
+
+            vpc_stack_id = resp['StackId']
+            print(f"Started CloudFormation VPC template installation for VPC stack '{vpc_stack_name}', stack ID is {vpc_stack_id}.")
+            return vpc_stack_id
+        except Exception as ex:
+            ex_str = str(ex)
+
+            if vpc_stack_id_to_update and (ex_str.find('No updates are to be performed') >= 0):
+                print(f"No stack updates were necessary. Using existing stack name '{vpc_stack_name}'.\n")
+                return vpc_stack_id_to_update
+
+            logging.warning("Failed to install stack", exc_info=True)
+            print(f"Failed to install stack: {ex}")
+
+            if ex_str.find('AlreadyExistsException'):
+                rv = questionary.confirm(f"That stack already exists. Delete it?").ask()
+                if rv:
+                    self.delete_stack(vpc_stack_name, cf_client)
+
+            return None
+
+    def ask_for_subnets_in_vpc(self, ec2_client) -> Optional[List[str]]:
+        available_subnets = self.list_subnets(ec2_client)
 
         if available_subnets is None:
             return None
@@ -998,6 +1241,11 @@ class Wizard(object):
             # TODO
             return None
         else:
+            print("""
+You can select one or more subnets to use to run ECS tasks. 
+Normally these subnets should be private, unless you need to allow inbound access from the public internet like a web server.
+""")
+
             selected_subnets = []
             done_choice = 'Done selecting subnets'
 
@@ -1040,16 +1288,20 @@ class Wizard(object):
                 choices.remove(rv)
                 print(f"Selected subnets so far: {self.list_to_string(selected_subnets)}")
 
-    def ask_for_security_groups_in_vpc(self) -> Optional[List[str]]:
-        available_security_groups = self.list_security_groups()
+    def ask_for_security_groups_in_vpc(self, ec2_client) -> Optional[List[str]]:
+        available_security_groups = self.list_security_groups(ec2_client)
 
         if available_security_groups is None:
-            return None
+            return None            
 
         if len(available_security_groups) == 0:
             # TODO
             return None
         else:
+            print("""
+You can select one or more security groups here. However, most likely you only need a single one,
+which allows outbound access to the public internet.
+""")            
             selected_security_groups = []
             done_choice = 'Done selecting security groups'
             choices = [done_choice] + [f"{sg['GroupId']} ({sg['GroupName']})" for sg in available_security_groups]
@@ -1074,6 +1326,9 @@ class Wizard(object):
                 print(f"Selected security_groups so far: {self.list_to_string(selected_security_groups)}")
 
     def ask_for_api_key(self):
+        # TODO: allow user to get an API key on website
+        print('To enable monitoring and management for your Tasks and Workflows, please contact us at help@cloudreactor.io for a free CloudReactor account and obtain an API key.')
+
         q = "What is your CloudReactor API key?"
 
         old_api_key = self.api_key
@@ -1091,18 +1346,18 @@ class Wizard(object):
         existing_run_environments = self.list_run_environments()
 
         if existing_run_environments is None:
-            print(f"The CloudReactor API key '{self.api_key}' is not valid. Please check that it is correct.")
+            print(f"The CloudReactor API key '{self.api_key}' is not valid. Please check that it is correct.\n")
             self.api_key = None
         elif len(existing_run_environments) == 0:
-            print('No current Run Environments found. Please create a new one.')
+            print('No current Run Environments found. Please create a new one.\n')
         else:
             # Actually this is the number in the first page, but that should be sufficient
             print(f"There are currently {len(existing_run_environments)} Run Environments in your organization:")
 
             for run_environment in existing_run_environments:
-                print(run_environment['name'])
+                print("- " + run_environment['name'])
 
-            print('Your CloudReactor API key is valid.')
+            print('Your CloudReactor API key is valid.\n')
 
         self.save()
 
@@ -1118,7 +1373,7 @@ class Wizard(object):
         return DEFAULT_RUN_ENVIRONMENT_NAME
 
     def create_or_update_run_environment(self):
-        print("The CloudFormation template has been uploaded successfully.")
+        print("The CloudReactor permissions CloudFormation stack has been uploaded successfully.")
         print("The final step is to create or update a Run Environment in CloudReactor with the corresponding settings.")
 
         existing_run_environments = self.list_run_environments()
@@ -1249,9 +1504,11 @@ class Wizard(object):
             self.mode = Wizard.MODE_INTERVIEW
             self.saved_run_environment_name = None
             self.saved_run_environment_uuid = None
+            self.cluster_arn = None
             self.vpc_id = None
             self.subnets = None
             self.security_groups = None
+            self.was_vpc_created_by_wizard = False
             self.save()
             return True
         elif number == 2:
@@ -1344,10 +1601,8 @@ class Wizard(object):
 
         return existing_stacks
 
-    def list_vpcs(self):
+    def list_vpcs(self, ec2_client):
         print(f"Looking for existing VPCs in region {self.aws_region} ...")
-
-        ec2_client = self.make_boto_client('ec2')
 
         resp = None
         try:
@@ -1361,14 +1616,12 @@ class Wizard(object):
         print(f"Found {len(vpcs)} VPC(s) in region {self.aws_region}.")
         return [vpc['VpcId'] for vpc in vpcs]
 
-    def list_subnets(self):
+    def list_subnets(self, ec2_client):
         if not self.vpc_id:
             logging.error("list_subnets() called without a VPC")
             return None
 
         print(f"Looking for existing subnets in VPC {self.vpc_id} ...")
-
-        ec2_client = self.make_boto_client('ec2')
 
         resp = None
         try:
@@ -1387,7 +1640,7 @@ class Wizard(object):
             print('We could not determine your existing subnets. Please check your AWS credentials and permissions.')
             return None
 
-        print(f"subnets response = {resp}")
+        logging.debug(f"subnets response = {resp}")
 
         subnets = resp['Subnets']
         subnet_count = len(subnets)
@@ -1398,14 +1651,12 @@ class Wizard(object):
         
         return subnets
 
-    def list_security_groups(self):
+    def list_security_groups(self, ec2_client):
         if not self.vpc_id:
             logging.error("list_security_groups() called without a VPC")
             return None
 
-        print(f"Looking for existing security_groups in VPC {self.vpc_id} ...")
-
-        ec2_client = self.make_boto_client('ec2')
+        print(f"Looking for existing security groups in VPC {self.vpc_id} ...")
 
         resp = None
         try:
@@ -1420,16 +1671,16 @@ class Wizard(object):
                 ],
                 MaxResults=100)
         except Exception as ex:
-            logging.warning(f"Failed to list security_groups: {ex}")
-            print('We could not determine your existing security_groups. Please check your AWS credentials and permissions.')
+            logging.warning(f"Failed to list security groups: {ex}")
+            print('We could not determine your existing security groups. Please check your AWS credentials and permissions.')
             return None
 
         security_groups = resp['SecurityGroups']
         security_group_count = len(security_groups)
-        print(f"Found {security_group_count} security_group(s) in VPC {self.vpc_id}.")
+        print(f"Found {security_group_count} security group(s) in VPC {self.vpc_id}.")
 
         if security_group_count == 100:
-            print("Warning: more than 100 security_groups found, only listing the first 100.")
+            print("Warning: more than 100 security groups found, only listing the first 100.")
 
         # Return the raw response data    
         return security_groups
@@ -1493,6 +1744,20 @@ if __name__ == '__main__':
     logging.basicConfig(level=numeric_log_level,
                         format=f"%(levelname)s: %(message)s")
     print_banner()
+
+    print("""    
+Welcome to the CloudReactor AWS setup wizard!
+
+This wizard can help you set up an ECS cluster and VPC suitable for running tasks in Docker 
+containers using Fargate. You can also use it to enable CloudReactor to monitor and 
+manage your tasks.
+
+Tips:
+- You can hit "Control-C" at any time to return to editing settings individually.
+- When responding to questions, default answers are in square brackets, like [SOMEDEFAULT].
+  Hitting enter will use the default answer.
+
+""")
 
     logging.debug(f"CloudReactor Base URL = '{CLOUDREACTOR_API_BASE_URL}'")
 

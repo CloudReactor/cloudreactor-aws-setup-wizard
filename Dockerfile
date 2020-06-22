@@ -27,6 +27,7 @@ ENV PYTHONFAULTHANDLER 1
 
 ENV PYTHONPATH /usr/app/src
 
+COPY templates ./templates
 COPY src ./src
 
 # TODO
