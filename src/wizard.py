@@ -331,16 +331,17 @@ class Wizard(object):
         return self.aws_region
 
     def ask_for_aws_access_key(self):
-        print("To allow this wizard to create AWS resources for you, it needs an AWS access key.")
-        print("The access key needs to be associated with a user that has the following permissions:")
-        print("- Upload CloudFormation stack")
-        print("- Create IAM Roles")
-        print("- List ECS clusters, VPCs, subnets, and security groups")
-        print("- Create ECS clusters (if using the wizard to create an ECS cluster)")        
-        print("- Create VPCs, subnets, internet gateways, and security groups (if using the wizard to create a VPC)")
-        print()
-        print("The access key and secret key are not sent to CloudReactor.")
-        print()
+        print("""
+To allow this wizard to create AWS resources for you, it needs an AWS access key.
+The access key needs to be associated with a user that has the following permissions to:
+- Upload CloudFormation stack
+- Create IAM Roles
+- List ECS clusters, VPCs, subnets, and security groups
+- Create ECS clusters (if using the wizard to create an ECS cluster)
+- Create VPCs, subnets, internet gateways, and security groups (if using the wizard to create a VPC)
+
+The access key and secret key are not sent to CloudReactor.
+""")
 
         old_aws_access_key = self.aws_access_key
        
@@ -1071,8 +1072,14 @@ class Wizard(object):
         return self.create_vpc()
 
     def create_vpc(self):
-        print('This wizard can create a VPC suitable for running ECS tasks, along with subnets and a security group.')
-        print('For more information, see https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Subnets.html\n')
+        print("""
+This wizard can create a VPC suitable for running ECS tasks, along with subnets and a security group.
+For more information, see https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Subnets.html
+
+To create the VPC, this wizard uses a modified version of a CloudFormation template created
+by cloudonaut (https://cloudonaut.io/templates-for-aws-cloudformation/). 
+Big thanks to cloudonaut for creating this!
+""")
 
         cf_client = self.make_boto_client('cloudformation')
 
@@ -1497,6 +1504,10 @@ which allows outbound access to the public internet.
 
         selected = questionary.select('What would you like to do next?',
                                     choices=choices).ask()
+
+        if selected is None:
+            return None
+
         dot_index = selected.find('.')
         number = int(selected[:dot_index])
 
@@ -1760,14 +1771,6 @@ Tips:
 """)
 
     logging.debug(f"CloudReactor Base URL = '{CLOUDREACTOR_API_BASE_URL}'")
-
-    bucket_suffix = ''
-    file_suffix = ''
-    if deployment_environment and (deployment_environment != 'production'):
-        bucket_suffix = "-" + deployment_environment
-        file_suffix = "." + deployment_environment
-
-    bucket_name = 'cloudreactor-customer-setup' + bucket_suffix
 
     wizard = None
 
