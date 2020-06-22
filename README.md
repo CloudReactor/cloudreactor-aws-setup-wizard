@@ -4,10 +4,10 @@ A command-line wizard to setup customer environments for running tasks managed b
 
 ## What this can do (pick and choose any or all):
 
-1. Create a VPC, subnets, and a security group for running ECS Fargate tasks
-2. Create an ECS cluster
-3. Give permissions to CloudReactor to monitor and manage your ECS tasks 
-4. Create or update Run Environments in CloudReactor so it knows how to run your ECS tasks
+* Create a VPC, subnets, and a security group for running ECS Fargate tasks
+* Create an ECS cluster
+* Give permissions to CloudReactor to monitor and manage your ECS tasks 
+* Create or update Run Environments in CloudReactor so it knows how to run your ECS tasks
 
 ## Permissions required
 
@@ -35,3 +35,9 @@ With native python 3.8+:
 
     pip install -r requirements.txt
     python src/wizard.py
+
+## Acknowledgments
+
+* [cloudonaut.io](https://github.com/widdix/aws-cf-templates) for a CloudFormation
+template for creating a VPC
+* [Text to ASCII Art Generator](patorjk.com) for the logo
