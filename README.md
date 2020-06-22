@@ -38,6 +38,7 @@ With native python 3.8+:
 
 ## Acknowledgments
 
+* [questionary](https://github.com/tmbo/questionary) for prompts
 * [cloudonaut.io](https://github.com/widdix/aws-cf-templates) for a CloudFormation
 template for creating a VPC
 * [Text to ASCII Art Generator](patorjk.com) for the logo
