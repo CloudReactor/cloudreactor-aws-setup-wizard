@@ -1745,6 +1745,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     deployment_environment = args.environment or 'production'
+    
+    if deployment_environment != 'production':
+        print(f"Using deployment environment '{deployment_environment}'")
 
     log_level = (args.log_level or os.environ.get('WIZARD_LOG_LEVEL', DEFAULT_LOG_LEVEL)).upper()
     numeric_log_level = getattr(logging, log_level, None)
