@@ -164,6 +164,21 @@ Resources:
     Properties:
       SubnetId: !Ref Subnet{{az_letter}}Private
       NetworkAclId: !Ref NetworkAclPrivate
+  EIP{{az_letter}}:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      Domain: vpc
+  NATGateway{{az_letter}}:
+    Type: 'AWS::EC2::NatGateway'
+    Properties:
+      AllocationId: !GetAtt 'EIP{{az_letter}}.AllocationId'
+      SubnetId: !Ref Subnet{{az_letter}}Public
+  NATRoute{{az_letter}}:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref RouteTable{{az_letter}}Private
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref NATGateway{{az_letter}}
   {% endfor %}
   DefaultTaskSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
@@ -209,6 +224,11 @@ Outputs:
     Value: !Ref RouteTable{{az_letter}}Private
     Export:
       Name: !Sub '${AWS::StackName}-RouteTable{{az_letter}}Private'
+  NATGateway{{az_letter}}:
+    Description: 'NAT Gateway {{az_letter}}'
+    Value: !Ref NATGateway{{az_letter}}
+    Export:
+      Name: !Sub '${AWS::StackName}-NATGateway{{az_letter}}'
   {% endfor %}
   CidrBlock:
     Description: 'The set of IP addresses for the VPC'
