@@ -333,7 +333,7 @@ class Wizard(object):
     def ask_for_aws_access_key(self):
         print("""
 To allow this wizard to create AWS resources for you, it needs an AWS access key.
-The access key needs to be associated with a user that has the following permissions to:
+The access key needs to be associated with a user that has the following permissions:
 - Upload CloudFormation stack
 - Create IAM Roles
 - List ECS clusters, VPCs, subnets, and security groups
