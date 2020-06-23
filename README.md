@@ -21,15 +21,33 @@ The access key needs to be associated with a user that has the following permiss
 
 The access key and secret key are not sent to CloudReactor.
 
-## Running
+## Running the wizard
 
-With Docker Compose on Linux or MacOS:
+### Using Docker
+
+Docker is the recommended way to run the wizard, since it removes the need to install dependencies
+
+To start, if you haven't already, install Docker Compose on Linux, or Docker Desktop on macOS or Windows.
+
+Once installed, run Docker. Clone this repo. In a terminal window, navigate to the repo. Then:
+
+**On Linux or macOS, run:**
+
+    docker-compose build wizard
+    
+and then
 
     ./wizard.sh
 
-With Docker Desktop for Windows:
+**On Windows, run:**
+    
+    docker-compose build wizard
+
+and then
 
     .\wizard.bat
+
+### Without Docker (native deployment)
 
 With native python 3.8+:
 
