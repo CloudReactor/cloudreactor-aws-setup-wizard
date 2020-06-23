@@ -1262,7 +1262,7 @@ Normally these subnets should be private, unless you need to allow inbound acces
                 arn = subnet['SubnetArn']
                 subnet_id = arn[(arn.rfind('/') + 1):]
                 subnet_name = None
-                tags = subnet['Tags'] or []
+                tags = subnet.get('Tags') or []
                 for tag in tags:
                     if tag['Key'] == 'Name':
                         subnet_name = tag['Value']
