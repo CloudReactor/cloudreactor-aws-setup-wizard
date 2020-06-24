@@ -13,9 +13,9 @@ A command-line wizard to setup customer environments for running tasks managed b
 
 To allow this wizard to create AWS resources for you, it needs an AWS access key.
 The access key needs to be associated with a user that has the following permissions to:
-* Upload CloudFormation stack
+* Upload CloudFormation stacks
 * Create IAM Roles
-* List ECS clusters, VPCs, subnets, and security groups
+* List ECS clusters, VPCs, subnets, NAT gateways, Elastic IPs, and security groups
 * Create ECS clusters (if using the wizard to create an ECS cluster)
 * Create VPCs, subnets, internet gateways, and security groups (if using the wizard to create a VPC)
 
@@ -25,7 +25,7 @@ The access key and secret key are not sent to CloudReactor.
 
 ### Using Docker
 
-Docker is the recommended way to run the wizard, since it removes the need to install dependencies
+Docker is the recommended way to run the wizard, since it removes the need to install dependencies.
 
 To start, if you haven't already, install Docker Compose on Linux, or Docker Desktop on macOS or Windows.
 
@@ -33,15 +33,19 @@ Once installed, run Docker. Clone this repo. In a terminal window, navigate to t
 
 **On Linux or macOS, run:**
 
-    docker-compose build wizard
-    
+    ./build.sh
+
+(only needed the first time you get the source code, or whenever you update the source code from the repo)
+      
 and then
 
     ./wizard.sh
 
 **On Windows, run:**
     
-    docker-compose build wizard
+    .\build.bat
+
+(only needed the first time you get the source code, or whenever you update the source code from the repo)
 
 and then
 
@@ -54,7 +58,7 @@ With native python 3.8+:
     pip install -r requirements.txt
     python src/wizard.py
 
-## Acknowledgments
+## Acknowledgements
 
 * [questionary](https://github.com/tmbo/questionary) for prompts
 * [cloudonaut.io](https://github.com/widdix/aws-cf-templates) for a CloudFormation
