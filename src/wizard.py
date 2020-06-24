@@ -175,7 +175,7 @@ class Wizard(object):
             v = self.__dict__[attr]
 
             if v and (attr == 'aws_secret_key'):
-                v = v[0] + ('*' * max(len(v) - 2, 0)) + v[-1]
+                v = self.obfuscate_string(v)
             elif attr in ['subnets', 'security_groups']:
                 v = self.list_to_string(v)
 
@@ -367,9 +367,17 @@ The access key and secret key are not sent to CloudReactor.
         q = 'What is the AWS secret key corresponding to your AWS access key?'
 
         if old_aws_secret_key:
-            q += f" [{old_aws_secret_key}]"
+            q += f" [{self.obfuscate_string(old_aws_secret_key)}]"
 
-        self.aws_secret_key = questionary.password(q).ask() or old_aws_secret_key
+        aws_secret_key = questionary.password(q).ask()
+
+        if aws_secret_key is None:
+            return None
+
+        if not aws_secret_key:
+            aws_secret_key = old_aws_secret_key
+
+        self.aws_secret_key = aws_secret_key
 
         if self.aws_secret_key != self.aws_access_key:
             self.clear_aws_state()
@@ -378,7 +386,7 @@ The access key and secret key are not sent to CloudReactor.
         return self.aws_secret_key
 
     def ask_for_role_stack_name_and_upload(self):
-        print("To allow CloudReactor to run tasks on your behalf, you'll need to install an AWS CloudFormation stack that grants CloudReactor permissions to control tasks.")
+        print("To allow CloudReactor to run tasks on your behalf, you'll need to install an AWS CloudFormation stack that grants CloudReactor permissions to do so.")
         print(f"To see the resources that will be added, please see {self.make_cloudformation_role_template_url()}")
 
         cf_client = self.make_boto_client('cloudformation')
@@ -1076,9 +1084,7 @@ The access key and secret key are not sent to CloudReactor.
 This wizard can create a VPC suitable for running ECS tasks, along with subnets and a security group.
 For more information, see https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Subnets.html
 
-To create the VPC, this wizard uses a modified version of a CloudFormation template created
-by cloudonaut (https://cloudonaut.io/templates-for-aws-cloudformation/). 
-Big thanks to cloudonaut for creating this!
+To create the VPC, this wizard installs a CloudFormation template.
 """)
 
         cf_client = self.make_boto_client('cloudformation')
@@ -1732,6 +1738,11 @@ which allows outbound access to the public internet.
                 print(f"Got response status {response_status} from the server")
 
         return None
+
+    def obfuscate_string(self, v: str) -> str:
+        if not v:
+            return ''
+        return v[0] + ('*' * max(len(v) - 2, 0)) + v[-1]
 
 
 if __name__ == '__main__':
