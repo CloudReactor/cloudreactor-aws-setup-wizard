@@ -785,8 +785,8 @@ The access key and secret key are not sent to CloudReactor.
             print(f"The CloudReactor permissions stack upload failed with status '{self.stack_upload_status}' and status reason '{self.stack_upload_status_reason}'.")
             return None
 
-    def wait_for_vpc_stack_upload(self, vpc_stack_id: str,  vpc_stack_name: str,
-        cf_client):
+    def wait_for_vpc_stack_upload(self, vpc_stack_id: str, vpc_stack_name: str,
+            cf_client):
         if not vpc_stack_id:
             logging.error("wait_for_vpc_stack_upload() called but, but no vpc_stack_id was specified.")
             return False
@@ -1195,7 +1195,7 @@ To create the VPC, this wizard installs a CloudFormation template.
         return template.render(data)
 
     def start_vpc_cloudformation_template_upload(self, vpc_stack_name: str,
-        vpc_stack_id_to_update: str, vpc_template: str, cf_client=None):
+            vpc_stack_id_to_update: str, vpc_template: str, cf_client=None):
         if not cf_client:
             cf_client = self.make_boto_client('cloudformation')
 
