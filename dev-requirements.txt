@@ -7,13 +7,13 @@
 boto3-stubs[essential]==1.13.19.0 \
     --hash=sha256:7754cd67f8e9f08e4b1b2646427252f35398de5c9e9cc5797a59d81df3a04fce \
     # via -r dev-requirements.in
-boto3==1.13.19 \
-    --hash=sha256:2e58368d32171f42100353007fb48fe583ea9deafd0ec556aa2bc1ce1582d06d \
-    --hash=sha256:c774003dc13d6de74b5e19d2b84d625da4456e64bd97f44baa1fcf40d808d29a \
+boto3==1.14.7 \
+    --hash=sha256:4856c8cb4150b900cc7dccbdf16f542fb8c12e97b17639979e58760847f7cf35 \
+    --hash=sha256:fe6f7f58fa53c4dd86432315717c989a65a5a8748e6219a53725be1041c4a113 \
     # via -c requirements.txt, mypy-boto3
-botocore==1.16.19 \
-    --hash=sha256:5cb537e7a4cf2d59a2a8dfbbc8e14ec3bc5b640eb81a1bf3bb0523c0a75e6b1b \
-    --hash=sha256:7b8b1f082665c8670b9aa70143ee527c5d04939fe027a63ac5958359be20ccb0 \
+botocore==1.17.7 \
+    --hash=sha256:cce790e65368d28dfd715558daea6890922716efa69d3a4c76d80348a71ad460 \
+    --hash=sha256:e582e3ba61d812e8dd0939c0455c6f68cf41587506a3a30deafc54825087de01 \
     # via -c requirements.txt, boto3, s3transfer
 certifi==2020.4.5.1 \
     --hash=sha256:1d987a998c75633c40847cc966fcf5904906c920a7f17ef374f5aa4282abd304 \
@@ -128,7 +128,7 @@ pyyaml==5.3.1 \
     --hash=sha256:b8eac752c5e14d3eca0e6dd9199cd627518cb5ec06add0de9d32baeee6fe645d \
     --hash=sha256:cc8955cfbfc7a115fa81d85284ee61147059a753344bc51098f3ccd69b0d7e0c \
     --hash=sha256:d13155f591e6fcc1ec3b30685d50bf0711574e2c0dfffd7644babf8b5102ca1a \
-    # via dparse
+    # via -c requirements.txt, dparse
 requests==2.23.0 \
     --hash=sha256:43999036bfa82904b6af1d99e4882b560e5e2c68e5c4b0aa03b655f3d7d73fee \
     --hash=sha256:b3f43d496c6daba4493e7c431722aeb7dbc6288f52a6e04e7b6023b0247817e6 \
