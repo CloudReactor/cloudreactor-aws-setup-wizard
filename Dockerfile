@@ -6,13 +6,14 @@ LABEL maintainer="jeff@cloudreactor.io"
 
 WORKDIR /usr/app
 
-RUN pip install --no-cache-dir --upgrade pip==20.1.1
+RUN pip install --no-input --no-cache-dir --upgrade pip==20.2.3
+RUN pip install --no-input --no-cache-dir pip-tools==5.1.2
 
 COPY requirements.txt .
 
 # install dependencies
 # https://stackoverflow.com/questions/45594707/what-is-pips-no-cache-dir-good-for
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-input --no-cache-dir -r requirements.txt
 
 # Output directly to the terminal to prevent logs from being lost
 # https://stackoverflow.com/questions/59812009/what-is-the-use-of-pythonunbuffered-in-docker-file
