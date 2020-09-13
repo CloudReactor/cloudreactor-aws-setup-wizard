@@ -47,13 +47,3 @@ services:
   dev-shell:
     <<: *dev-base
     command: bash
-
-  pip-compile:
-    <<: *service-base
-    entrypoint: ["pip-compile", "--allow-unsafe", "--generate-hashes"]
-    command: ["requirements.in",  "--output-file", "requirements.txt"]
-
-  pip-compile-dev:
-    <<: *service-base
-    entrypoint: ["pip-compile", "--allow-unsafe", "--generate-hashes"]
-    command: ["dev-requirements.in", "--output-file", "dev-requirements.txt"]
