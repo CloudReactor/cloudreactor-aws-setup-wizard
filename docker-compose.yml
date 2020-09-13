@@ -16,14 +16,6 @@ x-dev-base: &dev-base
     context: ./
     dockerfile: Dockerfile-dev
 
-x-pip-compile-base: &pip-compile-base
-  image: cloudreactor-aws-setup-wizard_pip-tools
-  build:
-    context: ./
-    dockerfile: tools/pip-tools/Dockerfile
-  volumes:
-    - ./:/work
-
 services:
   make_template:
     <<: *service-base
@@ -31,11 +23,11 @@ services:
   wizard:
     <<: *service-base
     entrypoint: python src/wizard.py
-    #environment:
-      #- AWS_PROFILE=${AWS_PROFILE}
+    environment:
+      - AWS_PROFILE=${AWS_PROFILE}
     volumes:
       - .:/usr/app
-      #- ~/.aws/:/root/.aws:ro
+      - ~/.aws/:/root/.aws:ro
 
   shell:
     <<: *service-base
@@ -57,8 +49,11 @@ services:
     command: bash
 
   pip-compile:
-    <<: *pip-compile-base
+    <<: *service-base
+    entrypoint: ["pip-compile", "--allow-unsafe", "--generate-hashes"]
+    command: ["requirements.in",  "--output-file", "requirements.txt"]
 
   pip-compile-dev:
-    <<: *pip-compile-base
-    command: dev-requirements.in --output-file dev-requirements.txt
+    <<: *service-base
+    entrypoint: ["pip-compile", "--allow-unsafe", "--generate-hashes"]
+    command: ["dev-requirements.in", "--output-file", "dev-requirements.txt"]
