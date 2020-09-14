@@ -38,7 +38,7 @@ services:
 
   mypy:
     <<: *dev-base
-    entrypoint: ["mypy", "src"]
+    entrypoint: ["mypy", "--config-file", "src/mypy.ini", "src"]
 
   safety:
     <<: *dev-base
