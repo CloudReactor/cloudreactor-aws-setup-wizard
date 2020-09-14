@@ -31,7 +31,7 @@ services:
 
   shell:
     <<: *service-base
-    command: bash
+    entrypoint: bash
 
   flake8:
     <<: *dev-base
