@@ -6,7 +6,7 @@ A command-line wizard to setup customer environments for running tasks managed b
 
 * Create a VPC, subnets, and a security group for running ECS Fargate tasks
 * Create an ECS cluster
-* Give permissions to CloudReactor to monitor and manage your ECS tasks 
+* Give permissions to CloudReactor to monitor and manage your ECS tasks
 * Create or update Run Environments in CloudReactor so it knows how to run your ECS tasks
 
 ## Permissions required
@@ -36,13 +36,13 @@ Once installed, run Docker. Clone this repo. In a terminal window, navigate to t
     ./build.sh
 
 (only needed the first time you get the source code, or whenever you update the source code from the repo)
-      
+
 and then
 
     ./wizard.sh
 
 **On Windows, run:**
-    
+
     .\build.bat
 
 (only needed the first time you get the source code, or whenever you update the source code from the repo)
@@ -51,7 +51,7 @@ and then
 
     .\wizard.bat
 
-### Without Docker (native deployment)
+### Without Docker (native execution)
 
 With native python 3.8+:
 
