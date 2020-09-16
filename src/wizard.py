@@ -18,6 +18,8 @@ import boto3
 import questionary
 from jinja2 import Environment, FileSystemLoader
 
+from cloudreactor_api_client import CloudReactorApiClient
+
 DEFAULT_LOG_LEVEL = 'ERROR'
 SAVED_STATE_FILENAME = 'saved_settings.json'
 DEFAULT_SUFFIX = ' (Default)'
@@ -70,9 +72,6 @@ CLOUDFORMATION_SUCCESSFUL_STATUSES = set([
     'CREATE_COMPLETE', 'UPDATE_COMPLETE', 'IMPORT_COMPLETE'
 ])
 
-CLOUDREACTOR_API_BASE_URL = os.environ.get('CLOUDREACTOR_API_BASE_URL',
-    'https://api.cloudreactor.io')
-
 
 def print_banner():
     with open('banner.txt') as f:
@@ -92,7 +91,7 @@ class Wizard(object):
         '6': ['security_groups', 'Security group(s)'],
         '7': ['deployment_environment', 'Deployment Environment name'],
         '8': ['stack_name', 'CloudReactor permissions CloudFormation stack name'],
-        '9': ['api_key', 'CloudReactor API key'],
+        '9': ['cloudreactor_credentials', 'CloudReactor credentials'],
     }
 
     def __init__(self, cloudreactor_deployment_environment: str) -> None:
@@ -123,7 +122,9 @@ class Wizard(object):
         self.stack_upload_status_reason: Optional[str] = None
         self.saved_run_environment_uuid: Optional[str] = None
         self.saved_run_environment_name: Optional[str] = None
-        self.api_key: Optional[str] = None
+        self.cloudreactor_credentials: Optional[Tuple[str, str]] = None
+        self.cloudreactor_api_client: Optional[CloudReactorApiClient] = None
+        self.cloudreactor_group: Optional[Tuple[int, str]] = None
 
         self.mode = Wizard.MODE_INTERVIEW
 
@@ -137,7 +138,9 @@ class Wizard(object):
         self.aws_region = None
         self.aws_access_key = None
         self.aws_secret_key = None
-        self.api_key = None
+        self.cloudreactor_credentials = None
+        self.cloudreactor_api_client = None
+        self.cloudreactor_group = None
         self.saved_run_environment_name = None
         self.deployment_environment = None
         self.stack_name = None
@@ -189,8 +192,21 @@ class Wizard(object):
             attr = arr[0]
             v = self.__dict__[attr]
 
-            if v and (attr == 'aws_secret_key'):
-                v = self.obfuscate_string(v)
+            if v is not None:
+                if attr == 'aws_access_key':
+                  if self.aws_account_id:
+                      v += ' (validated)'
+                  else:
+                      v += ' (unvalidated)'
+                if attr == 'aws_secret_key':
+                    v = self.obfuscate_string(v)
+                    if self.aws_account_id:
+                        v += ' (validated)'
+                    else:
+                        v += ' (unvalidated)'
+                elif attr == 'cloudreactor_credentials':
+                    v = f"{v[0]} / [saved password]"
+
             elif attr in ['subnets', 'security_groups']:
                 v = self.list_to_string(v)
 
@@ -250,7 +266,7 @@ class Wizard(object):
         # CHECKME
         if self.are_all_properties_set():
             self.handle_all_settings_entered()
-            
+
         return None
 
     def handle_all_settings_entered(self):
@@ -321,8 +337,8 @@ class Wizard(object):
             return self.ask_for_security_groups()
         elif p == 'deployment_environment':
             return self.ask_for_deployment_environment()
-        elif p == 'api_key':
-            return self.ask_for_api_key()
+        elif p == 'cloudreactor_credentials':
+            return self.ask_for_cloudreactor_credentials()
         elif p == 'cluster_arn':
             return self.ask_for_ecs_cluster_arn()
         else:
@@ -510,7 +526,7 @@ The access key and secret key are not sent to CloudReactor.
         t = self.ask_for_stack_name(
                 default_stack_name=default_stack_name,
                 old_uploaded_stack_name=old_uploaded_stack_name,
-                create_or_update_message="If you've never set up CloudReactor before, you should install a new CloudFormation stack.",
+                create_or_update_message="If you've never set up CloudReactor before or are creating a new Run Environment, you should install a new CloudFormation stack.",
                 purpose=' to grant CloudReactor permissions to control tasks',
                 cf_client=cf_client)
 
@@ -632,8 +648,13 @@ The access key and secret key are not sent to CloudReactor.
         return name
 
     def save(self) -> None:
+        old_client = self.cloudreactor_api_client
+        self.cloudreactor_api_client = None
+
         with open(SAVED_STATE_FILENAME, 'w') as f:
             f.write(jsonpickle.encode(self))
+
+        self.cloudreactor_api_client = old_client
 
     def validate_aws_access(self) -> Optional[str]:
         sts = None
@@ -1028,8 +1049,11 @@ The access key and secret key are not sent to CloudReactor.
         if self.stack_upload_succeeded:
             print('The installation of the CloudFormation stack for CloudReactor permissions was successful.')
 
-            if self.api_key:
-                return self.create_or_update_run_environment()
+            if self.cloudreactor_credentials:
+                if self.create_or_update_run_environment():
+                    return True
+
+                return False
             else:
                 return True
         else:
@@ -1467,48 +1491,127 @@ which allows outbound access to the public internet.
                 choices.remove(rv)
                 print(f"Selected security_groups so far: {self.list_to_string(selected_security_groups)}")
 
-    def ask_for_api_key(self) -> Optional[str]:
-        print('To enable monitoring and management for your Tasks and Workflows, create an CloudReactor account and obtain an API key.')
+    def ask_for_cloudreactor_credentials(self) -> Optional[Tuple[str, str]]:
+        print('To enable monitoring and management for your Tasks and Workflows, create an CloudReactor account.')
 
-        q = "What is your CloudReactor API key?"
+        old_username: Optional[str] = None
+        old_password: Optional[str] = None
+        if self.cloudreactor_credentials:
+            old_username = self.cloudreactor_credentials[0]
+            old_password = self.cloudreactor_credentials[1]
 
-        old_api_key = self.api_key
-        if old_api_key:
-            q += f" [{old_api_key}]"
+        q = 'What is your CloudReactor username?'
 
-        self.api_key = questionary.text(q).ask()
+        if old_username:
+            q += f" [{old_username}]"
 
-        if self.api_key is None:
+        username = questionary.text(q).ask()
+
+        if username is None:
             return None
 
-        if not self.api_key:
-            self.api_key = old_api_key
+        if not username:
+            username = old_username
 
-            if not self.api_key:
-                print("Skipping CloudReactor API key for now.")
+            if not username:
+                print("Skipping CloudReactor credentials for now.")
                 return None
+
+        q = 'What is your CloudReactor password?'
+
+        if old_password:
+            q += f" [saved password]"
+
+        password =  questionary.password(q).ask()
+
+        if password is None:
+            return None
+
+        if not password:
+            password = old_password
+
+            if not password:
+                print("Skipping CloudReactor credentials for now.")
+                return None
+
+        cloudreactor_api_client = CloudReactorApiClient(username=username,
+                password=password)
 
         print()
 
-        existing_run_environments = self.list_run_environments()
+        try:
+            cloudreactor_api_client.list_groups()
+            self.cloudreactor_credentials = (username, password)
+            self.cloudreactor_api_client = cloudreactor_api_client
 
-        if existing_run_environments is None:
-            print(f"The CloudReactor API key '{self.api_key}' is not valid. Please check that it is correct.\n")
-            self.api_key = None
-        elif len(existing_run_environments) == 0:
-            print('No current Run Environments found. Please create a new one.\n')
-        else:
-            # Actually this is the number in the first page, but that should be sufficient
-            print(f"There are currently {len(existing_run_environments)} Run Environments in your organization:")
-
-            for run_environment in existing_run_environments:
-                print("- " + run_environment['name'])
-
-            print('Your CloudReactor API key is valid.\n')
+            print('Your CloudReactor credentials are valid.')
+        except:
+            logging.exception('Failed to list groups')
+            self.cloudreactor_api_client = None
+            self.cloudreactor_credentials = None
+            self.cloudreactor_group = None
 
         self.save()
+        return self.cloudreactor_credentials
 
-        return self.api_key
+    def ask_for_cloudreactor_group(self) -> Optional[Tuple[int, str]]:
+        cr_api_client = self.get_or_create_cloudreactor_api_client()
+
+        if not cr_api_client:
+            print('CloudReactor credentials were not set, please set them.')
+            return None
+
+        existing_groups = cr_api_client.list_groups()['results']
+
+        create_new_choice = 'Create a new Group ...'
+        group_id: Optional[int] = None
+        group_name: Optional[str] = None
+
+        if existing_groups:
+            choices = [group['name'] for group in existing_groups]
+            choices.append(create_new_choice)
+
+            group_name = questionary.select("Which Group do you want to put your Run Environment in?", choices=choices).ask()
+            if group_name is None:
+                return None
+
+            if group_name != create_new_choice:
+                group_id = [group['id'] for group
+                    in existing_groups if group['name'] == group_name][0]
+
+        if group_id:
+            self.cloudreactor_group = (group_id, group_name)
+            self.save()
+            return self.cloudreactor_group
+
+        q = 'What do you want to name your Group? '
+
+        group_name = questionary.text(q).ask()
+
+        if group_name is None:
+            return None
+
+        data = {
+            'name': group_name
+        }
+        try:
+            saved_group = cr_api_client.create_group(data=data)
+            self.cloudreactor_group = (saved_group['id'], saved_group['name'])
+            self.save()
+            return self.cloudreactor_group
+        except Exception as ex:
+            print(f"An error occurred creating the Group: {ex}\n")
+            return None
+
+    def get_or_create_cloudreactor_api_client(self) -> Optional[CloudReactorApiClient]:
+        if self.cloudreactor_credentials:
+            if self.cloudreactor_api_client:
+                return self.cloudreactor_api_client
+            else:
+                return CloudReactorApiClient(username=self.cloudreactor_credentials[0],
+                        password=self.cloudreactor_credentials[1])
+
+        return None
 
     def make_default_run_environment_name(self) -> str:
         if self.deployment_environment:
@@ -1527,7 +1630,29 @@ which allows outbound access to the public internet.
         print("The CloudReactor permissions CloudFormation stack has been uploaded successfully.")
         print("The final step is to create or update a Run Environment in CloudReactor with the corresponding settings.")
 
-        existing_run_environments = self.list_run_environments()
+        cr_api_client = self.get_or_create_cloudreactor_api_client()
+
+        if not cr_api_client:
+            print('CloudReactor credentials were not set, please set them.')
+            return None
+
+        # TODO: wait for better multi-group support on API server
+        if self.cloudreactor_group is None:
+            #group = self.ask_for_cloudreactor_group()
+
+            groups = cr_api_client.list_groups()['results']
+
+            if len(groups) == 0:
+                print("No Groups found, please create one on the CloudReactor website.")
+                return None
+
+            if len(groups) > 1:
+                print("Warning: multiple Groups found. We're working on improving our multi-Group support, but for now you can only use the first Group.")
+
+            self.cloudreactor_group = (groups[0]['id'], groups[0]['name'])
+
+        existing_run_environments = cr_api_client.list_run_environments(
+                group_id=self.cloudreactor_group[0])['results']
 
         default_run_environment_name = self.make_default_run_environment_name()
         create_new_choice = 'Create a new Run Environment'
@@ -1567,16 +1692,6 @@ which allows outbound access to the public internet.
                 if not run_environment_name:
                     return None
 
-        http_method = 'POST'
-        url = CLOUDREACTOR_API_BASE_URL + '/api/v1/run_environments/'
-
-        if run_environment_uuid:
-            print(f"Updating Run Environment '{run_environment_name}' ...\n")
-            http_method = 'PATCH'
-            url += (run_environment_uuid + '/')
-        else:
-            print(f"Creating Run Environment '{run_environment_name}'.\n")
-
         ecs_caps = {
             'type': 'AWS ECS',
             'default_launch_type': 'FARGATE',
@@ -1602,50 +1717,37 @@ which allows outbound access to the public internet.
             'execution_method_capabilities': [ecs_caps]
         }
 
-        response_ok = False
-        response_status: Optional[int] = None
-        response_body: Optional[str] = None
+        if run_environment_uuid is None:
+            data['created_by_group'] = {
+                'id': self.cloudreactor_group[0]
+            }
+
         saved_run_environment: Optional[Dict[str, Any]] = None
-
+        action = 'creating'
         try:
-            http = urllib3.PoolManager()
-            r = http.request(http_method, url,
-                             body=json.dumps(data),
-                             headers={
-                                 'Authorization': f"Token {self.api_key}",
-                                 'Accept': 'application/json',
-                                 'Content-Type': 'application/json'
-                             }, timeout=10.0)
+            if run_environment_uuid:
+                action = 'updating'
+                print(f"Updating Run Environment '{run_environment_name}' ...\n")
 
-            response_status = cast(int, r.status)
+                saved_run_environment = cr_api_client.update_run_environment(
+                        uuid=run_environment_uuid, data=data)
+            else:
+                print(f"Creating Run Environment '{run_environment_name}'.\n")
+                saved_run_environment = cr_api_client.create_run_environment(data=data)
 
-            response_body = cast(str, r.data.decode('utf-8'))
-            saved_run_environment = json.loads(response_body)
-
-            response_ok = (response_status >= 200) and (response_status < 300)
-        except urllib3.exceptions.HTTPError as http_error:
-            print(f"An error communicating with cloudreactor.io occurred: {http_error}")
-
-        if response_ok:
             self.saved_run_environment_uuid = saved_run_environment.get('uuid')
 
             if not self.saved_run_environment_uuid:
-                print('The Run Environment creation/update response was invalid. ' + HELP_MESSAGE)
+                print('The Run Environment creation/update response was invalid. ' + HELP_MESSAGE + "\n")
+                self.saved_run_environment_uuid = None
                 return False
 
             self.saved_run_environment_name = saved_run_environment['name']
             self.save()
             return True
-        else:
-            print('An error occurred creating the Run Environment.')
-
-            if response_body:
-                print(f"Got response status {response_status} and response body: {response_body} from the server")
-            else:
-                print(f"Got response status {response_status} from the server")
-
-        print()
-        return False
+        except Exception as ex:
+            print(f"An error occurred {action} the Run Environment: {ex}\n")
+            return False
 
     def handle_run_environment_saved(self):
         action = 'updated' if self.saved_run_environment_uuid else 'created'
@@ -1655,6 +1757,21 @@ which allows outbound access to the public internet.
 
         if not self.subnets or not self.security_groups:
             print("You may optionally add default subnets and security groups there.")
+
+        print(
+f"""
+You can set secrets in Secrets Manager with the name prefix:
+
+CloudReactor/{self.deployment_environment}/common/
+
+Tasks running in this Run Environment have access to the secrets installed there,
+through the default Task Execution Role of this the Run Environment.
+In particular, if you are deploying a project based on an example quickstart project,
+you should install your CloudReactor API key with a name of:
+
+CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
+
+""")
 
         print()
 
@@ -1683,11 +1800,14 @@ which allows outbound access to the public internet.
             self.security_groups = None
             self.was_vpc_created_by_wizard = None
             self.deployment_environment = None
+            self.cloudreactor_group = None
             self.clear_stack_upload_state()
+            self.print_menu()
             return True
         elif number == 2:
             self.mode = Wizard.MODE_INTERVIEW
             self.reset()
+            self.print_menu()
             return True
         else:
             print("To deploy a task managed and monitored by CloudReactor, please follow the instructions at https://docs.cloudreactor.io/\n")
@@ -1861,43 +1981,6 @@ which allows outbound access to the public internet.
         # Return the raw response data
         return security_groups
 
-    def list_run_environments(self) -> Optional[Any]:
-        if not self.api_key:
-            logging.error("API key not set, can't list Run Environments")
-            return None
-
-        response_ok = False
-        response_status = None
-        response_body = None
-        page = None
-
-        try:
-            http = urllib3.PoolManager()
-            r = http.request('GET', CLOUDREACTOR_API_BASE_URL + '/api/v1/run_environments/',
-                             headers={
-                                 'Authorization': f"Token {self.api_key}",
-                                 'Accept': 'application/json'
-                             }, timeout=10.0)
-
-            response_status = r.status
-
-            response_body = r.data.decode('utf-8')
-            page = json.loads(response_body)
-
-            response_ok = response_status == 200
-        except urllib3.exceptions.HTTPError as http_error:
-            print(f"An error communicating with cloudreactor.io occurred: {http_error}")
-
-        if response_ok:
-            return page['results']
-        else:
-            if response_body:
-                print(f"Got response status {response_status} and response body: {response_body} from the server")
-            else:
-                print(f"Got response status {response_status} from the server")
-
-        return None
-
     def obfuscate_string(self, v: str) -> str:
         if not v:
             return ''
@@ -1943,8 +2026,6 @@ Tips:
 
 """)
 
-    logging.debug(f"CloudReactor Base URL = '{CLOUDREACTOR_API_BASE_URL}'")
-
     wizard = None
 
     if os.path.isfile(SAVED_STATE_FILENAME):
@@ -1955,7 +2036,7 @@ Tips:
         except Exception:
             print("Couldn't read save file, starting over. Sorry about that!")
     else:
-        print("No save file found, starting a new save file.")
+        print('No save file found, starting a new save file.')
 
     if wizard is None:
         wizard = Wizard(
