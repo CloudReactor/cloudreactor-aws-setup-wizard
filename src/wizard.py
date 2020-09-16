@@ -1765,11 +1765,13 @@ You can set secrets in Secrets Manager with the name prefix:
 CloudReactor/{self.deployment_environment}/common/
 
 Tasks running in this Run Environment have access to the secrets installed there,
-through the default Task Execution Role of this the Run Environment.
-In particular, if you are deploying a project based on an example quickstart project,
-you should install your CloudReactor API key with a name of:
+through the default Task Execution Role of this Run Environment.
+In particular, if you are deploying a project based on the CloudReactor quickstart project,
+you should set your CloudReactor API key in AWS Secrets Manager with a name of:
 
 CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
+
+Set the cloudreactor_api_key secret to be plaintext, and copy & paste your API key as the value.
 
 """)
 
