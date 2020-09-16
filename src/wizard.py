@@ -381,7 +381,7 @@ to access are located.
     def ask_for_aws_access_key(self) -> Optional[str]:
         print("""
 To allow this wizard to create AWS resources for you, it needs an AWS access key.
-The access key needs to be associated with a user that has the following permissions:
+The access key needs to have the following permissions:
 - Upload CloudFormation stack
 - Create IAM Roles
 - List ECS clusters, VPCs, subnets, and security groups
@@ -819,7 +819,7 @@ The access key and secret key are not sent to CloudReactor.
                     Parameters=[
                         {
                             'ParameterKey': 'DeploymentEnvironment',
-                            'ParameterValue': 'hey',
+                            'ParameterValue': self.deployment_environment,
                             'UsePreviousValue': False,
                         },
                         {
@@ -1068,12 +1068,14 @@ The access key and secret key are not sent to CloudReactor.
 
     def ask_for_subnets(self) -> Optional[List[str]]:
         print()
-        print("ECS Tasks require subnets to run in. For more information see https://cloudonaut.io/fargate-networking-101/")
-        print("This step allows you to specify the default subnets for tasks associated with a CloudReactor Run Environment, so that CloudReactor can use those subnets when starting or scheduling tasks.")
-        print("If you have existing subnets that contain AWS resources your tasks need to access, you should select them below.")
-        print("If you don't have existing subnets, this wizard can create them for you now.")
-        print("You can also choose to skip this step and enter the subnets after the Run Environment has been created.")
-        print()
+        print("""
+ECS Tasks require subnets to run in. For more information see https://cloudonaut.io/fargate-networking-101/")
+This step allows you to specify the default subnets for tasks associated with a CloudReactor Run Environment,
+so that CloudReactor can use those subnets when starting or scheduling tasks.
+If you have existing subnets that contain AWS resources your tasks need to access, you should select them below.
+If you don't have existing subnets, this wizard can create them for you now.
+You can also choose to skip this step and enter the subnets after the Run Environment has been created.
+        """)
 
         choices = []
 
