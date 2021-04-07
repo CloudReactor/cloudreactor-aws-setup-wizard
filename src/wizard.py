@@ -2,7 +2,6 @@ from typing import cast, Any, Dict, List, Optional, Tuple
 
 import argparse
 from datetime import datetime
-import json
 import os
 import logging
 import random
@@ -13,7 +12,6 @@ import urllib.parse
 import yaml
 
 import jsonpickle
-import urllib3
 import boto3
 import questionary
 from jinja2 import Environment, FileSystemLoader
@@ -1085,7 +1083,7 @@ You can also choose to skip this step and enter the subnets after the Run Enviro
             choices = ['Use previously entered subnets: ' + subnets_str]
 
         choices += [
-            'Create a new VPC which includes subnets',
+            'Create a new VPC which includes subnets, or use an existing VPC set up by this wizard',
             'Select existing subnet(s)',
             # 'Enter subnets manually',
             'Skip subnets'
@@ -1638,7 +1636,6 @@ which allows outbound access to the public internet.
             print('CloudReactor credentials were not set, please set them.')
             return None
 
-        # TODO: wait for better multi-group support on API server
         if self.cloudreactor_group is None:
             #group = self.ask_for_cloudreactor_group()
 
@@ -1649,9 +1646,12 @@ which allows outbound access to the public internet.
                 return None
 
             if len(groups) > 1:
-                print("Warning: multiple Groups found. We're working on improving our multi-Group support, but for now you can only use the first Group.")
+                t = self.ask_for_cloudreactor_group()
 
-            self.cloudreactor_group = (groups[0]['id'], groups[0]['name'])
+                if not t:
+                  return None
+            else:
+                self.cloudreactor_group = (groups[0]['id'], groups[0]['name'])
 
         existing_run_environments = cr_api_client.list_run_environments(
                 group_id=self.cloudreactor_group[0])['results']
@@ -2002,7 +2002,7 @@ if __name__ == '__main__':
     cloudreactor_deployment_environment = args.environment or 'production'
 
     if cloudreactor_deployment_environment != 'production':
-        print(f"Using deployment environment '{cloudreactor_deployment_environment}'")
+        print(f"Using CloudReactor deployment environment '{cloudreactor_deployment_environment}'")
 
     log_level = (args.log_level or os.environ.get('WIZARD_LOG_LEVEL', DEFAULT_LOG_LEVEL)).upper()
     numeric_log_level = getattr(logging, log_level, None)
