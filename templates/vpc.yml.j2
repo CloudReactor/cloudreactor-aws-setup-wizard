@@ -1,7 +1,7 @@
 ---
 {#
-# Copyright 2020 CloudReactor, Inc.
-# 
+# Copyright 2021 Machine Intelligence Services, Inc.
+#
 # based on the file vpc-3azs.yaml from cloudonaut.io
 #
 # Copyright 2018 widdix GmbH
@@ -100,9 +100,9 @@ Resources:
   {% set az_letter = ['A', 'B', 'C', 'D'][i] %}
   {% set third_octet_public = i * 32 %}
   {% set third_octet_private = i * 32 + 16 %}
-  Subnet{{az_letter}}Public:    
+  Subnet{{az_letter}}Public:
     Type: 'AWS::EC2::Subnet'
-    Properties:      
+    Properties:
       AvailabilityZone: !Select [{{i}}, !GetAZs '']
       CidrBlock: !Sub '10.{{second_octet}}.{{third_octet_public}}.0/20'
       MapPublicIpOnLaunch: true
@@ -112,11 +112,11 @@ Resources:
         Value: '{{az_letter}} public'
       - Key: Reach
         Value: public
-  Subnet{{az_letter}}Private:    
+  Subnet{{az_letter}}Private:
     Type: 'AWS::EC2::Subnet'
-    Properties:      
+    Properties:
       AvailabilityZone: !Select [{{i}}, !GetAZs '']
-      CidrBlock: !Sub '10.{{second_octet}}.{{third_octet_private}}.0/20'      
+      CidrBlock: !Sub '10.{{second_octet}}.{{third_octet_private}}.0/20'
       VpcId: !Ref VPC
       Tags:
       - Key: Name
@@ -147,7 +147,7 @@ Resources:
     Properties:
       SubnetId: !Ref Subnet{{az_letter}}Private
       RouteTableId: !Ref RouteTable{{az_letter}}Private
-  RouteTablePublic{{az_letter}}InternetRoute: 
+  RouteTablePublic{{az_letter}}InternetRoute:
     Type: 'AWS::EC2::Route'
     DependsOn: VPCGatewayAttachment
     Properties:
@@ -190,20 +190,20 @@ Outputs:
     Description: 'cloudonaut.io template version.'
     Value: '8.3.1'
   StackName:
-    Description: 'Stack name.'
+    Description: 'Stack name'
     Value: !Sub '${AWS::StackName}'
   AZs:
     Description: 'AZs'
     Value: {{az_count}}
     Export:
-      Name: !Sub '${AWS::StackName}-AZs'      
+      Name: !Sub '${AWS::StackName}-AZs'
   {% for i in range(0, az_count) %}
   {% set az_letter = ['A', 'B', 'C', 'D'][i] %}
   AZ{{az_letter}}:
     Description: 'AZ of {{az_letter}}'
     Value: !Select [{{i}}, !GetAZs '']
     Export:
-      Name: !Sub '${AWS::StackName}-AZ{{az_letter}}'      
+      Name: !Sub '${AWS::StackName}-AZ{{az_letter}}'
   Subnet{{az_letter}}Public:
     Description: 'Public subnet {{az_letter}}'
     Value: !Ref Subnet{{az_letter}}Public
@@ -259,7 +259,7 @@ Outputs:
     Description: 'Private route tables'
     Value: !Join [',', [{% for i in range(0, az_count) %}{% set az_letter = ['A', 'B', 'C', 'D'][i] %}!Ref RouteTable{{az_letter}}Private{% if not loop.last %}, {% endif %}{% endfor %}]]
     Export:
-      Name: !Sub '${AWS::StackName}-RouteTablesPrivate'    
+      Name: !Sub '${AWS::StackName}-RouteTablesPrivate'
   InternetGateway:
     Description: 'Internet gateway'
     Value: !Ref InternetGateway

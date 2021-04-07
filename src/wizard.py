@@ -16,6 +16,8 @@ import boto3
 import questionary
 from jinja2 import Environment, FileSystemLoader
 
+from botocore.exceptions import ClientError
+
 from cloudreactor_api_client import CloudReactorApiClient
 
 DEFAULT_LOG_LEVEL = 'ERROR'
@@ -418,6 +420,8 @@ The access key and secret key are not sent to CloudReactor.
         if self.aws_secret_key:
             if self.validate_aws_access():
                 self.save()
+            else:
+                return None
 
         return self.aws_access_key
 
@@ -680,10 +684,14 @@ The access key and secret key are not sent to CloudReactor.
             print("You must set the AWS region before selecting an ECS cluster.\n")
             return None
 
+        if self.aws_account_id is None:
+            print("You must set your AWS credentials before selecting an ECS cluster.\n")
+            return None
+
         ecs_client = self.make_boto_client('ecs')
 
         if ecs_client is None:
-            print("You must set your AWS credentials before selecting an ECS cluster.\n")
+            print("Your AWS credentials do not give you access to ECS operations. Please check your AWS credentials.\n")
             return None
 
         self.available_cluster_arns = None
@@ -691,7 +699,7 @@ The access key and secret key are not sent to CloudReactor.
             resp = ecs_client.list_clusters(maxResults=100)
             self.available_cluster_arns = resp['clusterArns']
             self.save()
-        except Exception:
+        except ClientError as client_error:
             logging.warning("Can't list clusters", exc_info=True)
 
         if (self.available_cluster_arns is None) or (len(self.available_cluster_arns) == 0):
@@ -1065,8 +1073,8 @@ The access key and secret key are not sent to CloudReactor.
             return False
 
     def ask_for_subnets(self) -> Optional[List[str]]:
-        print()
         print("""
+
 ECS Tasks require subnets to run in. For more information see https://cloudonaut.io/fargate-networking-101/")
 This step allows you to specify the default subnets for tasks associated with a CloudReactor Run Environment,
 so that CloudReactor can use those subnets when starting or scheduling tasks.
@@ -1074,6 +1082,14 @@ If you have existing subnets that contain AWS resources your tasks need to acces
 If you don't have existing subnets, this wizard can create them for you now.
 You can also choose to skip this step and enter the subnets after the Run Environment has been created.
         """)
+
+        if not self.aws_account_id:
+            print("""
+
+You must set your AWS credentials before selecting or creating subnets.
+
+            """)
+            return None
 
         choices = []
 
@@ -1132,13 +1148,26 @@ You can also choose to skip this step and enter the subnets after the Run Enviro
         return None
 
     def ask_for_security_groups(self) -> Optional[List[str]]:
-        print()
-        print("ECS Tasks require at least one security group that allows outbound access to the public internet.")
-        print("This step allows you to specify the default security groups to give tasks associated with a CloudReactor Run Environment, so that CloudReactor can assign those security groups when starting or scheduling tasks.")
-        print("If you have existing security groups you want to assign to your tasks by default, you should select them below.")
-        print("If you don't an existing security group, this wizard can create it for you now.")
-        print("You can also choose to skip this step and enter the security groups after the Run Environment has been created.")
-        print()
+        print("""
+
+ECS Tasks require at least one security group that allows outbound access to the
+public internet. This step allows you to specify the default security groups to
+give tasks associated with a CloudReactor Run Environment, so that CloudReactor
+can assign those security groups when starting or scheduling tasks.
+If you have existing security groups you want to assign to your tasks by
+default, you should select them below.
+If you don't an existing security group, this wizard can create it for you now.
+You can also choose to skip this step and enter the security groups after the
+Run Environment has been created.
+
+        """)
+        if not self.aws_account_id:
+            print("""
+
+You must set your AWS credentials before creating or selecting security groups.
+
+            """)
+            return None
 
         choices = []
 
@@ -1298,8 +1327,14 @@ To create the VPC, this wizard installs a CloudFormation template.
 
         logging.debug(f"vpc_template = {vpc_template}")
 
+        default_stack_name = 'ECS-VPC'
+        if self.deployment_environment:
+            default_stack_name += ' ' + self.deployment_environment
+            default_stack_name = re.sub('[^A-Za-z0-9\-]+', '-',
+                    default_stack_name)[:128]
+
         rv = self.ask_for_stack_name(
-                default_stack_name='ECS-VPC',
+                default_stack_name=default_stack_name,
                 old_uploaded_stack_name=None,
                 create_or_update_message=None,
                 purpose=' to create a VPC',
@@ -1812,7 +1847,7 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
             self.print_menu()
             return True
         else:
-            print("To deploy a task managed and monitored by CloudReactor, please follow the instructions at https://docs.cloudreactor.io/\n")
+            print("To deploy a Task managed and monitored by CloudReactor, please follow the instructions at https://docs.cloudreactor.io/\n")
             print("We hope you enjoy using CloudReactor!")
             print()
             exit(0)
