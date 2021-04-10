@@ -18,25 +18,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #}
+{% set vpc_cidr = "10." + (second_octet | string) + ".0.0/16" %}
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'VPC: public and private subnets in {{az_count}} availability zone(s), based on a cloudonaut.io template'
 Resources:
   VPC:
     Type: 'AWS::EC2::VPC'
     Properties:
-      CidrBlock: !Sub '10.{{second_octet}}.0.0/16'
+      CidrBlock: {{ vpc_cidr }}
       EnableDnsSupport: true
       EnableDnsHostnames: true
       InstanceTenancy: default
       Tags:
       - Key: Name
-        Value: '10.{{second_octet}}.0.0/16'
+        Value: {{ vpc_cidr }}
   InternetGateway:
     Type: 'AWS::EC2::InternetGateway'
     Properties:
       Tags:
       - Key: Name
-        Value: '10.{{second_octet}}.0.0/16'
+        Value: {{ vpc_cidr }}
   EgressOnlyInternetGateway:
     Type: 'AWS::EC2::EgressOnlyInternetGateway'
     Properties:
@@ -180,6 +181,68 @@ Resources:
       DestinationCidrBlock: '0.0.0.0/0'
       NatGatewayId: !Ref NATGateway{{az_letter}}
   {% endfor %}
+  VPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub SecurityGroup-VPCEndpoint-${AWS::StackName}
+      GroupDescription: Access to the VPC endpoints
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - CidrIp: {{ vpc_cidr }}
+          IpProtocol: -1
+  ECRAPIVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      SubnetIds:
+        {% for i in range(0, az_count) %}
+        {% set az_letter = ['A', 'B', 'C', 'D'][i] %}
+        - !Ref Subnet{{az_letter}}Private
+        {% endfor %}
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      ServiceName: !Join [ '', [ 'com.amazonaws.', { 'Ref': 'AWS::Region' }, '.ecr.api' ] ]
+      PrivateDnsEnabled: true
+      VpcId: !Ref VPC
+  S3VPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        {% for i in range(0, az_count) %}
+        {% set az_letter = ['A', 'B', 'C', 'D'][i] %}
+        - !Ref RouteTable{{az_letter}}Private
+        {% endfor %}
+      ServiceName: !Join [ '', [ 'com.amazonaws.', { 'Ref': 'AWS::Region' }, '.s3' ] ]
+      VpcId: !Ref VPC
+  ECRDKRVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      SubnetIds:
+        {% for i in range(0, az_count) %}
+        {% set az_letter = ['A', 'B', 'C', 'D'][i] %}
+        - !Ref Subnet{{az_letter}}Private
+        {% endfor %}
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      ServiceName: !Join [ '', [ 'com.amazonaws.', { 'Ref': 'AWS::Region' }, '.ecr.dkr' ] ]
+      PrivateDnsEnabled: true
+      VpcId: !Ref VPC
+  CloudWatchVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      SubnetIds:
+        {% for i in range(0, az_count) %}
+        {% set az_letter = ['A', 'B', 'C', 'D'][i] %}
+        - !Ref Subnet{{az_letter}}Private
+        {% endfor %}
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      ServiceName: !Join [ '', [ 'com.amazonaws.', { 'Ref': 'AWS::Region' }, '.logs' ] ]
+      PrivateDnsEnabled: true
+      VpcId: !Ref VPC
   DefaultTaskSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
@@ -187,8 +250,8 @@ Resources:
       VpcId: !Ref VPC
 Outputs:
   TemplateVersion:
-    Description: 'cloudonaut.io template version.'
-    Value: '8.3.1'
+    Description: 'Template version.'
+    Value: '9.0.0'
   StackName:
     Description: 'Stack name'
     Value: !Sub '${AWS::StackName}'
