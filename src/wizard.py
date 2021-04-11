@@ -508,6 +508,10 @@ The access key and secret key are not sent to CloudReactor.
         return deployment_environment
 
     def ask_for_role_stack_name_and_upload(self) -> Optional[str]:
+        if not self.deployment_environment:
+            print("You must set the deployment environment name before installing CloudReactor permissions.\n")
+            return None
+
         print("To allow CloudReactor to run tasks on your behalf, you'll need to install an AWS CloudFormation stack that grants CloudReactor permissions to do so.")
         print(f"To see the resources that will be added, please see {self.make_cloudformation_role_template_url()}")
 
@@ -592,7 +596,7 @@ The access key and secret key are not sent to CloudReactor.
             reuse_stack = False
             while not good_stack_name:
                 stack_name = questionary.text(
-                    f"What do you want to name the CloudFormation stack{purpose}? [{default_stack_name}]").ask()
+                        f"What do you want to name the CloudFormation stack{purpose}? [{default_stack_name}]").ask()
 
                 if stack_name is None:
                     return None
@@ -614,8 +618,9 @@ The access key and secret key are not sent to CloudReactor.
 
             return stack_name, None, reuse_stack
         else:
-            stack_name = questionary.select("Which CloudFormation stack do you want to update and use?",
-                                            choices=existing_stack_names).ask()
+            stack_name = questionary.select(
+                    "Which CloudFormation stack do you want to update and use?",
+                    choices=existing_stack_names).ask()
 
             if stack_name is None:
                 return None
@@ -1266,6 +1271,8 @@ This wizard can create a VPC suitable for running ECS tasks, along with subnets 
 For more information, see https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Subnets.html
 
 To create the VPC, this wizard installs a CloudFormation template.
+If you created a VPC with this wizard previously, you can select it and
+this wizard will update it.
 """)
 
         cf_client = self.make_boto_client('cloudformation')
@@ -1348,6 +1355,12 @@ To create the VPC, this wizard installs a CloudFormation template.
 
         vpc_stack_id = vpc_stack_id_to_update
         if not reuse_stack:
+            if vpc_stack_id:
+                rv = questionary.confirm(f"Are you sure you want to update the stack '{vpc_stack_name}' with VPC resources?").ask()
+                if not rv:
+                    print('Not updating the stack with VPC. Returning to the menu.')
+                    return None
+
             rv = self.start_vpc_cloudformation_template_upload(vpc_stack_name,
                 vpc_stack_id_to_update, vpc_template, cf_client)
 
