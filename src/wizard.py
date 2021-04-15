@@ -1,4 +1,4 @@
-from typing import cast, Any, Dict, List, Optional, Tuple
+from typing import cast, Any, Optional, Tuple
 
 import argparse
 from datetime import datetime
@@ -100,12 +100,12 @@ class Wizard(object):
         self.aws_access_key: Optional[str] = None
         self.aws_secret_key: Optional[str] = None
         self.aws_account_id: Optional[str] = None
-        self.available_cluster_arns: Optional[List[str]] = None
+        self.available_cluster_arns: Optional[list[str]] = None
         self.cluster_arn: Optional[str] = None
         self.vpc_id: Optional[str] = None
         self.was_vpc_created_by_wizard: Optional[bool] = None
-        self.subnets: Optional[List[str]] = None
-        self.security_groups: Optional[List[str]] = None
+        self.subnets: Optional[list[str]] = None
+        self.security_groups: Optional[list[str]] = None
         self.deployment_environment: Optional[str] = None
         self.stack_name: Optional[str] = None
         self.stack_id_to_update: Optional[str] = None
@@ -183,7 +183,7 @@ class Wizard(object):
             print(choice)
         print()
 
-    def make_property_choices(self) -> List[str]:
+    def make_property_choices(self) -> list[str]:
         choices = []
         property_count = len(Wizard.NUMBER_TO_PROPERTY)
         for i in range(property_count):
@@ -384,7 +384,7 @@ To allow this wizard to create AWS resources for you, it needs an AWS access key
 The access key needs to have the following permissions:
 - Upload CloudFormation stack
 - Create IAM Roles
-- List ECS clusters, VPCs, subnets, and security groups
+- list ECS clusters, VPCs, subnets, and security groups
 - Create ECS clusters (if using the wizard to create an ECS cluster)
 - Create VPCs, subnets, internet gateways, and security groups (if using the wizard to create a VPC)
 
@@ -462,7 +462,7 @@ The access key and secret key are not sent to CloudReactor.
         return self.aws_secret_key
 
     def make_default_deployment_environment_name(self) -> str:
-        strings_to_match: List[str] = []
+        strings_to_match: list[str] = []
         if self.stack_name:
             strings_to_match.append(self.stack_name.lower())
 
@@ -993,7 +993,7 @@ The access key and secret key are not sent to CloudReactor.
             return None
 
     def wait_for_stack_upload(self, stack_id: str, stack_name: str,
-            cf_client) -> Optional[Dict[str, Any]]:
+            cf_client) -> Optional[dict[str, Any]]:
         while True:
             resp = None
             try:
@@ -1152,7 +1152,7 @@ You must set your AWS credentials before selecting or creating subnets.
 
         return None
 
-    def ask_for_security_groups(self) -> Optional[List[str]]:
+    def ask_for_security_groups(self) -> Optional[list[str]]:
         print("""
 
 ECS Tasks require at least one security group that allows outbound access to the
@@ -1445,7 +1445,7 @@ this wizard will update it.
 
             return None
 
-    def ask_for_subnets_in_vpc(self, ec2_client) -> Optional[List[str]]:
+    def ask_for_subnets_in_vpc(self, ec2_client) -> Optional[list[str]]:
         available_subnets = self.list_subnets(ec2_client)
 
         if available_subnets is None:
@@ -1460,7 +1460,7 @@ You can select one or more subnets to use to run ECS tasks.
 Normally these subnets should be private, unless you need to allow inbound access from the public internet like a web server.
 """)
 
-            selected_subnets: List[str] = []
+            selected_subnets: list[str] = []
             done_choice = 'Done selecting subnets'
 
             choices = [done_choice]
@@ -1502,7 +1502,7 @@ Normally these subnets should be private, unless you need to allow inbound acces
                 choices.remove(rv)
                 print(f"Selected subnets so far: {self.list_to_string(selected_subnets)}")
 
-    def ask_for_security_groups_in_vpc(self, ec2_client) -> Optional[List[str]]:
+    def ask_for_security_groups_in_vpc(self, ec2_client) -> Optional[list[str]]:
         available_security_groups = self.list_security_groups(ec2_client)
 
         if available_security_groups is None:
@@ -1516,7 +1516,7 @@ Normally these subnets should be private, unless you need to allow inbound acces
 You can select one or more security groups here. However, most likely you only need a single one,
 which allows outbound access to the public internet.
 """)
-            selected_security_groups: List[str] = []
+            selected_security_groups: list[str] = []
             done_choice = 'Done selecting security groups'
             choices = [done_choice] + [f"{sg['GroupId']} ({sg['GroupName']})" for sg in available_security_groups]
 
@@ -1628,7 +1628,7 @@ which allows outbound access to the public internet.
                     in existing_groups if group['name'] == group_name][0]
 
         if group_id:
-            self.cloudreactor_group = (group_id, group_name)
+            self.cloudreactor_group = (group_id, cast(str, group_name))
             self.save()
             return self.cloudreactor_group
 
@@ -1701,8 +1701,9 @@ which allows outbound access to the public internet.
             else:
                 self.cloudreactor_group = (groups[0]['id'], groups[0]['name'])
 
+        cloudreactor_group = cast(Tuple[int, str], self.cloudreactor_group)
         existing_run_environments = cr_api_client.list_run_environments(
-                group_id=self.cloudreactor_group[0])['results']
+                group_id=cloudreactor_group[0])['results']
 
         default_run_environment_name = self.make_default_run_environment_name()
         create_new_choice = 'Create a new Run Environment'
@@ -1756,7 +1757,7 @@ which allows outbound access to the public internet.
         if self.security_groups:
             ecs_caps['default_security_groups'] = self.security_groups
 
-        data = {
+        data: dict[str, Any] = {
             'name': run_environment_name,
             'aws_account_id': self.aws_account_id,
             'aws_default_region': self.aws_region,
@@ -1769,10 +1770,10 @@ which allows outbound access to the public internet.
 
         if run_environment_uuid is None:
             data['created_by_group'] = {
-                'id': self.cloudreactor_group[0]
+                'id': cloudreactor_group[0]
             }
 
-        saved_run_environment: Optional[Dict[str, Any]] = None
+        saved_run_environment: Optional[dict[str, Any]] = None
         action = 'creating'
         try:
             if run_environment_uuid:
@@ -1889,10 +1890,10 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
 
     def make_boto_client(self, service_name: str):
         if self.aws_access_key and self.aws_secret_key:
-            return boto3.client(service_name,
-                                aws_access_key_id=self.aws_access_key,
-                                aws_secret_access_key=self.aws_secret_key,
-                                region_name=self.aws_region)
+            return boto3.client(service_name=service_name,
+                    region_name=self.aws_region,
+                    aws_access_key_id=self.aws_access_key,
+                    aws_secret_access_key=self.aws_secret_key)
 
         # TODO: use default credentials
         return None
@@ -1947,7 +1948,7 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
 
         return existing_stacks
 
-    def list_vpcs(self, ec2_client) -> Optional[List[str]]:
+    def list_vpcs(self, ec2_client) -> Optional[list[str]]:
         print(f"Looking for existing VPCs in region {self.aws_region} ...")
 
         resp = None
@@ -1962,7 +1963,7 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
         print(f"Found {len(vpcs)} VPC(s) in region {self.aws_region}.")
         return [vpc['VpcId'] for vpc in vpcs]
 
-    def list_subnets(self, ec2_client) -> Optional[List[Any]]:
+    def list_subnets(self, ec2_client) -> Optional[list[Any]]:
         if not self.vpc_id:
             logging.error("list_subnets() called without a VPC")
             return None
@@ -1997,7 +1998,7 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
 
         return subnets
 
-    def list_security_groups(self, ec2_client) -> Optional[List[Any]]:
+    def list_security_groups(self, ec2_client) -> Optional[list[Any]]:
         if not self.vpc_id:
             logging.error("list_security_groups() called without a VPC")
             return None

@@ -1,4 +1,4 @@
-from typing import cast, Any, Dict, Optional
+from typing import cast, Any, Optional
 
 import json
 import os
@@ -48,26 +48,26 @@ class CloudReactorApiClient(object):
 
         return 'JWT ' + self.access_token
 
-    def list_groups(self) -> Dict[str, Any]:
+    def list_groups(self) -> dict[str, Any]:
         return self.send_and_load_json('groups/')
 
-    def create_group(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def create_group(self, data: dict[str, Any]) -> dict[str, Any]:
         return self.send_and_load_json(path='groups/', method='POST', data=data)
 
-    def list_run_environments(self, group_id: int) -> Dict[str, Any]:
+    def list_run_environments(self, group_id: int) -> dict[str, Any]:
         return self.send_and_load_json('run_environments/', params={
             'created_by_group__id': group_id
         })
 
-    def create_run_environment(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def create_run_environment(self, data: dict[str, Any]) -> dict[str, Any]:
         return self.create_or_update_run_environment(None, data)
 
     def update_run_environment(self, uuid: str,
-            data: Dict[str, Any]) -> Dict[str, Any]:
+            data: dict[str, Any]) -> dict[str, Any]:
         return self.create_or_update_run_environment(uuid, data)
 
     def create_or_update_run_environment(self, uuid: Optional[str],
-            data: Dict[str, Any]) -> Dict[str, Any]:
+            data: dict[str, Any]) -> dict[str, Any]:
         path = 'run_environments/'
         method = 'POST'
         if uuid:
@@ -77,8 +77,8 @@ class CloudReactorApiClient(object):
         return self.send_and_load_json(path=path, method=method, data=data)
 
     def send_and_load_json(self, path: str, method: str = 'GET',
-            params: Optional[Dict[str, Any]] = None,
-            data: Optional[Dict[str, Any]] = None) -> Any:
+            params: Optional[dict[str, Any]] = None,
+            data: Optional[dict[str, Any]] = None) -> Any:
         headers = {
             'Authorization': self.make_authentication_header(),
             'Accept': 'application/json'
