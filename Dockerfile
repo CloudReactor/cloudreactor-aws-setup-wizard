@@ -32,6 +32,9 @@ ENV PYTHONFAULTHANDLER 1
 
 ENV PYTHONPATH /usr/app/src
 
+RUN mkdir ./saved_state
+COPY banner.txt ./
+COPY wizard_config.yml ./
 COPY templates ./templates
 COPY src ./src
 

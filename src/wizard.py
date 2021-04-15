@@ -21,7 +21,7 @@ from botocore.exceptions import ClientError
 from cloudreactor_api_client import CloudReactorApiClient
 
 DEFAULT_LOG_LEVEL = 'ERROR'
-SAVED_STATE_FILENAME = 'saved_settings.json'
+SAVED_STATE_FILENAME = './saved_state/saved_settings.json'
 DEFAULT_SUFFIX = ' (Default)'
 UNSET_STRING = '(Not Set)'
 EMPTY_LIST_STRING = '(Empty list, to be entered manually later)'
@@ -1077,15 +1077,19 @@ The access key and secret key are not sent to CloudReactor.
             self.clear_stack_upload_state()
             return False
 
-    def ask_for_subnets(self) -> Optional[List[str]]:
+    def ask_for_subnets(self) -> Optional[list[str]]:
         print("""
 
-ECS Tasks require subnets to run in. For more information see https://cloudonaut.io/fargate-networking-101/")
-This step allows you to specify the default subnets for tasks associated with a CloudReactor Run Environment,
-so that CloudReactor can use those subnets when starting or scheduling tasks.
-If you have existing subnets that contain AWS resources your tasks need to access, you should select them below.
+ECS Tasks require one or more subnets to run in.
+For more information see https://cloudonaut.io/fargate-networking-101/
+This step allows you to specify the default subnets for tasks associated with a
+CloudReactor Run Environment, so that CloudReactor can use those subnets when
+starting or scheduling tasks.
+If you have existing subnets that contain AWS resources your tasks need to
+access, you should select them below.
 If you don't have existing subnets, this wizard can create them for you now.
-You can also choose to skip this step and enter the subnets after the Run Environment has been created.
+You can also choose to skip this step and enter the subnets after the Run
+Environment has been created.
         """)
 
         if not self.aws_account_id:

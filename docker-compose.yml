@@ -5,7 +5,11 @@ x-service-base: &service-base
   build:
     context: ./
   volumes:
-    - .:/usr/app
+    - ./saved_state:/usr/app/saved_state
+    # These are here so we run the wizard with the latest source but without
+    # rebuilding the Docker image.
+    - ./src:/usr/app/src
+    - ./templates:/usr/app/templates
   env_file:
     - .env
 
