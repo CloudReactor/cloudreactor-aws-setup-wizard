@@ -115,10 +115,13 @@ if __name__ == '__main__':
             username=os.environ['CLOUDREACTOR_USERNAME'],
             password=os.environ['CLOUDREACTOR_PASSWORD'])
 
-    groups = client.list_groups()
+    groups = client.list_groups()['results']
 
     print(f"{groups=}")
 
-    run_environments = client.list_run_environments()
+    if len(groups) == 0:
+        print('No groups found, not listing Run Environments.');
+
+    run_environments = client.list_run_environments(groups[0]['id'])
 
     print(f"{run_environments=}")
