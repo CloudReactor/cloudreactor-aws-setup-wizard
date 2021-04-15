@@ -1,7 +1,7 @@
 version: "3.7"
 
 x-service-base: &service-base
-  image: aws-ecs-setup-wizard
+  image: aws-setup-wizard
   build:
     context: ./
   volumes:
@@ -15,7 +15,7 @@ x-service-base: &service-base
 
 x-dev-base: &dev-base
   <<: *service-base
-  image:  aws-ecs-setup-wizard_dev
+  image:  aws-setup-wizard_dev
   build:
     context: ./
     dockerfile: Dockerfile-dev

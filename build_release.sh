@@ -4,9 +4,9 @@
 
 set -e
 
-docker build -t aws-ecs-setup-wizard -t \
- cloudreactor/aws-ecs-setup-wizard .
+docker build -t aws-setup-wizard -t \
+ cloudreactor/aws-setup-wizard .
 
 # docker login
-# docker tag aws-ecs-setup-wizard cloudreactor/aws-ecs-setup-wizard:1.0.0
-# docker push cloudreactor/aws-ecs-setup-wizard:1.0.0
+# docker tag aws-setup-wizard cloudreactor/aws-setup-wizard:1.0.0
+# docker push cloudreactor/aws-setup-wizard:1.0.0
