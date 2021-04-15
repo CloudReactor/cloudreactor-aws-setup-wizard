@@ -1,13 +1,14 @@
 # Alpine base image can lead to long compilation times and errors.
 # https://pythonspeed.com/articles/base-image-python-docker-images/
-FROM python:3.8.5-buster
+FROM python:3.9.4-slim-buster
 
 LABEL maintainer="jeff@cloudreactor.io"
 
 WORKDIR /usr/app
 
-RUN pip install --no-input --no-cache-dir --upgrade pip==20.2.3
-RUN pip install --no-input --no-cache-dir pip-tools==5.1.2
+RUN pip install --no-input --no-cache-dir --upgrade pip==21.0.1
+RUN pip install --no-input --no-cache-dir pip-tools==5.5.0 MarkupSafe==1.1.1 \
+  requests==2.24.0
 
 COPY requirements.in .
 
@@ -33,11 +34,5 @@ ENV PYTHONPATH /usr/app/src
 
 COPY templates ./templates
 COPY src ./src
-
-# TODO
-#ARG ENV_FILE_PATH=deploy/files/.env.dev
-
-# copy deployment environment settings
-#COPY ${ENV_FILE_PATH} .env
 
 ENTRYPOINT ["python", "src/wizard.py"]
