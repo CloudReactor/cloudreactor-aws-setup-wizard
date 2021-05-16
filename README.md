@@ -9,22 +9,6 @@ A command-line wizard to setup customer environments for running tasks managed b
 * Give permissions to CloudReactor to monitor and manage your ECS tasks
 * Create or update Run Environments in CloudReactor so it knows how to run your ECS tasks
 
-## Permissions required
-
-To allow this wizard to create AWS resources for you, it needs an AWS access key.
-The access key needs to be associated with a user that has the following permissions to:
-
-* Upload CloudFormation stacks
-* Create IAM Roles
-* List ECS clusters, VPCs, subnets, NAT gateways, Elastic IPs, and security
-groups
-* Create ECS clusters (if using the wizard to create an ECS cluster)
-* Create VPCs, subnets, internet gateways, NAT gateways, route tables,
-route table associations, VPC endpoints, and security groups
-(if using the wizard to create a VPC)
-
-The access key and secret key are not sent to CloudReactor.
-
 ## Running the wizard
 
 ### Using Docker
@@ -56,6 +40,43 @@ In a terminal window, navigate to the repo. Then:
 
     pip install -r requirements.txt
     python src/wizard.py
+
+## Permissions required / granting access
+
+So that this wizard can create AWS resources for you, it needs the following
+permissions:
+
+* Upload CloudFormation stacks
+* Create IAM Roles
+* List ECS clusters, VPCs, subnets, NAT gateways, Elastic IPs, and security
+groups
+* Create ECS clusters (if using the wizard to create an ECS cluster)
+* Create VPCs, subnets, internet gateways, NAT gateways, route tables,
+route table associations, VPC endpoints, and security groups
+(if using the wizard to create a VPC)
+
+You can give the wizard these permissions in a few different ways:
+
+1) An access key and access secret that you manually enter when prompted by
+the wizard
+2) Passing the access key and the secret key in the environment variables
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` respectively when you
+launch the wizard. If you are using Docker to run the wizard:
+
+    ```
+    docker run --rm -it -v $PWD/saved_state:/usr/app/saved_state -e AWS_ACCESS_KEY_ID=<access_key> -e AWS_SECRET_ACCESS_KEY=<secret_key> cloudreactor/aws-setup-wizard
+    ```
+3) Using your credentials saved in `~/.aws`:
+
+    ```
+    docker run --rm -it -v $PWD/saved_state:/usr/app/saved_state -v $HOME/.aws/:/root/.aws/ -e AWS_PROFILE=<profile_name> cloudreactor/aws-setup-wizard
+    ```
+
+    `-e AWS_PROFILE=<profile_name>` can be omitted if you just want to use your
+    default AWS profile.
+
+4) If run from an EC2 instance, the wizard should inherit permissions from
+the EC2 instance role (not tested yet)
 
 ## Development
 

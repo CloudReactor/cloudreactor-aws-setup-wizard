@@ -28,13 +28,21 @@ services:
     <<: *service-base
     entrypoint: python src/wizard.py
 
-    environment:
-     - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
-     - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-     - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-     - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
+    # environment:
+     # AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+
+     # # To pass in access key / secret
+     # AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+     # AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+
+     # AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN}
+
+     # To use a AWS profile in ~/.aws
+     # AWS_PROFILE: ${AWS_PROFILE}
     volumes:
       - .:/usr/app
+      # To use a AWS profile in ~/.aws
+      #- /home/jtsay/.aws/:/root/.aws/
 
   shell:
     <<: *service-base

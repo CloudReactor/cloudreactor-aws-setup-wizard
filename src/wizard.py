@@ -52,6 +52,7 @@ AWS_REGIONS = [
 ]
 
 DEFAULT_AWS_REGION = 'us-west-2'
+NO_ACCESS_KEY = 'none'
 
 DEFAULT_RUN_ENVIRONMENT_NAME = 'staging'
 CREATE_NEW_ECS_CLUSTER_CHOICE = 'Create new ECS cluster ...'
@@ -199,7 +200,8 @@ class Wizard(object):
                   else:
                       v += ' (unvalidated)'
                 if attr == 'aws_secret_key':
-                    v = self.obfuscate_string(v)
+                    if v != NO_ACCESS_KEY:
+                        v = self.obfuscate_string(v)
                     if self.aws_account_id:
                         v += ' (validated)'
                     else:
@@ -392,11 +394,25 @@ The access key and secret key are not sent to CloudReactor.
 """)
 
         old_aws_access_key = self.aws_access_key
-        default_aws_access_key = old_aws_access_key or os.environ.get('AWS_ACCESS_KEY_ID')
+        default_aws_access_key = old_aws_access_key \
+                or os.environ.get('AWS_ACCESS_KEY_ID')
 
-        # TODO
-        # q = 'What AWS access key do you want to use? Type "none" to use the default permissions on this machine.'
-        q = 'What is the AWS access key do you want to use for this wizard?'
+        aws_account_id: Optional[str] = None
+        if not default_aws_access_key:
+            aws_account_id = self.validate_aws_access()
+
+        if aws_account_id:
+            q = f'You already have access to the AWS account with ID {aws_account_id}. Do you want to to use your current access for this wizard?'
+            rv = questionary.confirm(q).ask()
+
+            if rv:
+                self.aws_access_key = NO_ACCESS_KEY
+                self.aws_secret_key = NO_ACCESS_KEY
+                self.save()
+                return self.aws_access_key
+
+
+        q = f'What AWS access key do you want to use for this wizard?'
 
         if default_aws_access_key:
             q += f" [{default_aws_access_key}]"
@@ -670,6 +686,9 @@ The access key and secret key are not sent to CloudReactor.
         except Exception:
             logging.warning("Failed to validate AWS credentials", exc_info=True)
             print("The AWS access key / secret key pair was not valid. Please check them and try again.\n")
+            return None
+
+        if sts is None:
             return None
 
         try:
@@ -1893,17 +1912,23 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
                 + str(self.role_template_major_version) + file_qualifier + '.json'
 
     def make_boto_client(self, service_name: str):
-        if self.aws_access_key and self.aws_secret_key:
+        if self.aws_access_key and (self.aws_access_key != NO_ACCESS_KEY) \
+                and self.aws_secret_key \
+                and (self.aws_secret_key != NO_ACCESS_KEY):
             return boto3.client(service_name=service_name,
                     region_name=self.aws_region,
                     aws_access_key_id=self.aws_access_key,
                     aws_secret_access_key=self.aws_secret_key)
 
-        # TODO: use default credentials
-        return None
+        try:
+            return boto3.client(service_name=service_name,
+                    region_name=self.aws_region)
+        except:
+            return None
 
     def generate_random_key(self) -> str:
-        return ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(KEY_LENGTH))
+        return ''.join(random.SystemRandom().choice(string.ascii_uppercase \
+                + string.ascii_lowercase + string.digits) for _ in range(KEY_LENGTH))
 
     def list_to_string(self, arr) -> str:
         if arr is None:
