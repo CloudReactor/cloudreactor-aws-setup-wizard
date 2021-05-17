@@ -14,6 +14,7 @@ import yaml
 import jsonpickle
 import boto3
 import questionary
+from questionary import Choice
 from jinja2 import Environment, FileSystemLoader
 
 from botocore.exceptions import ClientError
@@ -1301,35 +1302,101 @@ If you created a VPC with this wizard previously, you can select it and
 this wizard will update it.
 """)
 
-        cf_client = self.make_boto_client('cloudformation')
+        ec2_client = self.make_boto_client('ec2')
 
-        if cf_client is None:
+        if ec2_client is None:
             print("You must set your AWS credentials before creating a VPC.\n")
             return None
 
-        done = False
-        num_zones = 2
-        while not done:
-            rv = questionary.text('How many availability zones do you want to use? [2]').ask()
+        az_response = ec2_client.describe_availability_zones(
+                Filters=[
+                    {
+                        'Name': 'region-name',
+                        'Values': [self.aws_region]
+                    }
+                ]
+        )
 
-            if rv is None:
-                return None
+        azs = az_response['AvailabilityZones']
 
-            num_zones = 2
-            if rv:
-                try:
-                    num_zones = int(rv)
-                except ValueError:
-                    print("The number of availability zones must be between 1 and 3.")
-                    continue
+        logging.debug(f"Got availability zones: {azs}")
 
-                if num_zones < 1 or num_zones > 3:
-                    print("The number of availability zones must be between 1 and 3.")
-                    continue
+        print(f"Got availability zones: {azs}")
+        az_name_to_id = {}
+        for az in azs:
+            az_name_to_id[az['ZoneName']] = az['ZoneId']
+
+        print("""
+Public subnets are accessible from the public internet and can make requests
+to the public internet with a free Internet Gateway (bandwidth charges still
+apply though). Because they are accessible to the public, they may not be
+secure enough for sensitive applications or data. If you plan on deploying
+a web server to public subnets, ensure you create at subnets in at least
+2 Availability Zones, so that you can use an Application Load Balancer.
+""")
+
+        choices = [Choice(f"{az['ZoneName']} ({az['ZoneId']})",
+                value=az['ZoneName'], checked=(i < 2)) \
+                for i, az in enumerate(azs)]
+
+        selected_public_azs = questionary.checkbox(
+                'Which availability zones do you want to create public subnets in?',
+                choices=choices).ask()
+
+        print(f"Selected public Availability Zones = {selected_public_azs}")
+
+        choices = [Choice(f"{az['ZoneName']} ({az['ZoneId']})",
+                value=az['ZoneName'], checked=az['ZoneName'] in selected_public_azs) \
+                for i, az in enumerate(azs)]
+
+        print("""
+Private subnets are inaccessible from the private internet, so running tasks in
+private subnets may be more secure than running them in a public subnet.
+However, each private subnet requires a relatively expensive NAT gateway
+(both hourly costs and bandwidth costs) to make requests to the public internet.
+
+NAT Gateways are required for Tasks that are monitored by CloudReactor, because
+the Tasks need to notify CloudReactor that they are starting and ending.
+
+Each NAT Gateway connects a private subnet to a public subnet, so ensure you
+create your private subnets that require NAT Gateways in the same Availability
+Zones as your public subnets.
+
+If you plan on deploying a web server to private subnets, ensure you create at
+subnets in at least 2 Availability Zones, so that you can use an
+Application Load Balancer.
+""")
+
+        selected_private_azs = questionary.checkbox(
+                'Which availability zones do you want to create private subnets in?',
+                choices=choices).ask()
+
+        selected_private_azs_with_nat = selected_private_azs
+
+        if len(selected_private_azs) == 0:
+            print('No subnets in private Availability Zones will be created.')
+        else:
+            print(f"Selected private Availability Zones = {selected_private_azs}")
+
+            choices = [
+                Choice(f"{az} ({az_name_to_id[az]})", value=az,
+                        checked=True) \
+                        for az in selected_private_azs \
+                        if az in selected_public_azs
+            ]
+
+            if len(choices) == 0:
+                print("""
+The public and private Availability Zones you selected have no zones in common.
+Therefore, none of your private Availability Zones will have access to the
+public internet. If this is not desired, press Control-C to abort the VPC
+creator.
+                """)
+
             else:
-                num_zones = 2
-
-            done = True
+                selected_private_azs_with_nat = questionary.checkbox(
+                        'Which Availability Zones do you want to add NAT Gateways to?',
+                        choices=choices).ask()
 
         second_octet = 0
         done = False
@@ -1355,16 +1422,22 @@ this wizard will update it.
 
             done = True
 
-        vpc_template = self.make_vpc_template(num_availability_zones=num_zones,
-            second_octet=second_octet)
+        vpc_template = self.make_vpc_template(
+                public_azs=selected_public_azs,
+                private_azs=selected_private_azs,
+                private_azs_with_nat=selected_private_azs_with_nat,
+                second_octet=second_octet)
 
-        logging.debug(f"vpc_template = {vpc_template}")
+        logging.debug("vpc_template = ")
+        logging.debug(vpc_template)
 
         default_stack_name = 'ECS-VPC'
         if self.deployment_environment:
             default_stack_name += ' ' + self.deployment_environment
-            default_stack_name = re.sub('[^A-Za-z0-9\-]+', '-',
+            default_stack_name = re.sub("[^A-Za-z0-9\\-]+", '-',
                     default_stack_name)[:128]
+
+        cf_client = self.make_boto_client('cloudformation')
 
         rv = self.ask_for_stack_name(
                 default_stack_name=default_stack_name,
@@ -1410,7 +1483,21 @@ this wizard will update it.
 
         return self.vpc_id
 
-    def make_vpc_template(self, num_availability_zones, second_octet) -> str:
+    def make_vpc_template(self, public_azs: list[str],
+            private_azs: list[str],
+            private_azs_with_nat: list[str],
+            second_octet: int) -> str:
+
+        public_az_letters = [az[-1].upper() for az in public_azs]
+        private_az_letters = [az[-1].upper() for az in private_azs]
+        private_az_with_nat_letters = [az[-1].upper() \
+                for az in private_azs_with_nat]
+
+        all_az_letters = list(dict.fromkeys(public_az_letters \
+                + private_az_letters))
+
+        all_az_letters.sort()
+
         env = Environment(
             loader=FileSystemLoader('./templates/')
         )
@@ -1418,7 +1505,10 @@ this wizard will update it.
         template = env.get_template('vpc.yml.j2')
 
         data = {
-            'az_count': num_availability_zones,
+            'all_az_letters': all_az_letters,
+            'public_az_letters': public_az_letters,
+            'private_az_letters': private_az_letters,
+            'private_az_with_nat_letters': private_az_with_nat_letters,
             'second_octet': second_octet,
         }
 
@@ -1723,7 +1813,7 @@ which allows outbound access to the public internet.
                 t = self.ask_for_cloudreactor_group()
 
                 if not t:
-                  return None
+                    return None
             else:
                 self.cloudreactor_group = (groups[0]['id'], groups[0]['name'])
 
@@ -1975,7 +2065,10 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
                     'status': status
                 })
 
-        print(f"Found {len(existing_stacks)} existing CloudFormation stack(s) in region {self.aws_region}.")
+        print(f"Found {len(existing_stacks)} existing CloudFormation stack(s) in region {self.aws_region}:")
+
+        for stack in existing_stacks:
+            print(f"{stack['name']}: {stack['status']}")
 
         return existing_stacks
 

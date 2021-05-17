@@ -20,7 +20,7 @@
 #}
 {% set vpc_cidr = "10." + (second_octet | string) + ".0.0/16" %}
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'VPC: public and private subnets in {{az_count}} availability zone(s), based on a cloudonaut.io template'
+Description: 'VPC with {{ public_az_letters | length }} public and {{ private_az_letters | length }} private subnet(s). Optimized for ECS Fargate. Based on a cloudonaut.io template, maintained by CloudReactor.'
 Resources:
   VPC:
     Type: 'AWS::EC2::VPC'
@@ -32,6 +32,7 @@ Resources:
       Tags:
       - Key: Name
         Value: {{ vpc_cidr }}
+  {% if public_az_letters | length > 0 %}
   InternetGateway:
     Type: 'AWS::EC2::InternetGateway'
     Properties:
@@ -54,13 +55,6 @@ Resources:
       Tags:
       - Key: Name
         Value: Public
-  NetworkAclPrivate:
-    Type: 'AWS::EC2::NetworkAcl'
-    Properties:
-      VpcId: !Ref VPC
-      Tags:
-      - Key: Name
-        Value: Private
   NetworkAclEntryInPublicAllowAll:
     Type: 'AWS::EC2::NetworkAclEntry'
     Properties:
@@ -79,6 +73,16 @@ Resources:
       RuleAction: allow
       Egress: true
       CidrBlock: '0.0.0.0/0'
+  {% endif %}
+
+  {% if private_az_letters | length > 0 %}
+  NetworkAclPrivate:
+    Type: 'AWS::EC2::NetworkAcl'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: Private
   NetworkAclEntryInPrivateAllowAll:
     Type: 'AWS::EC2::NetworkAclEntry'
     Properties:
@@ -97,10 +101,14 @@ Resources:
       RuleAction: allow
       Egress: true
       CidrBlock: '0.0.0.0/0'
-  {% for i in range(0, az_count) %}
-  {% set az_letter = ['A', 'B', 'C', 'D'][i] %}
+  {% endif %}
+
+  {% for i in range(0, all_az_letters | length) %}
+  {% set az_letter = all_az_letters[i] %}
   {% set third_octet_public = i * 32 %}
   {% set third_octet_private = i * 32 + 16 %}
+
+  {% if az_letter in public_az_letters %}
   Subnet{{az_letter}}Public:
     Type: 'AWS::EC2::Subnet'
     Properties:
@@ -113,17 +121,6 @@ Resources:
         Value: '{{az_letter}} public'
       - Key: Reach
         Value: public
-  Subnet{{az_letter}}Private:
-    Type: 'AWS::EC2::Subnet'
-    Properties:
-      AvailabilityZone: !Select [{{i}}, !GetAZs '']
-      CidrBlock: !Sub '10.{{second_octet}}.{{third_octet_private}}.0/20'
-      VpcId: !Ref VPC
-      Tags:
-      - Key: Name
-        Value: '{{az_letter}} private'
-      - Key: Reach
-        Value: private
   RouteTable{{az_letter}}Public:
     Type: 'AWS::EC2::RouteTable'
     Properties:
@@ -131,23 +128,11 @@ Resources:
       Tags:
       - Key: Name
         Value: {{az_letter}} Public
-  RouteTable{{az_letter}}Private:
-    Type: 'AWS::EC2::RouteTable'
-    Properties:
-      VpcId: !Ref VPC
-      Tags:
-      - Key: Name
-        Value: {{az_letter}} Private
   RouteTableAssociation{{az_letter}}Public:
     Type: 'AWS::EC2::SubnetRouteTableAssociation'
     Properties:
       SubnetId: !Ref Subnet{{az_letter}}Public
       RouteTableId: !Ref RouteTable{{az_letter}}Public
-  RouteTableAssociation{{az_letter}}Private:
-    Type: 'AWS::EC2::SubnetRouteTableAssociation'
-    Properties:
-      SubnetId: !Ref Subnet{{az_letter}}Private
-      RouteTableId: !Ref RouteTable{{az_letter}}Private
   RouteTablePublic{{az_letter}}InternetRoute:
     Type: 'AWS::EC2::Route'
     DependsOn: VPCGatewayAttachment
@@ -160,11 +145,40 @@ Resources:
     Properties:
       SubnetId: !Ref Subnet{{az_letter}}Public
       NetworkAclId: !Ref NetworkAclPublic
+  {% endif %}
+
+  {% if az_letter in private_az_letters %}
+  Subnet{{az_letter}}Private:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Select [{{i}}, !GetAZs '']
+      CidrBlock: !Sub '10.{{second_octet}}.{{third_octet_private}}.0/20'
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: '{{az_letter}} private'
+      - Key: Reach
+        Value: private
+  RouteTable{{az_letter}}Private:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: {{az_letter}} Private
+  RouteTableAssociation{{az_letter}}Private:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref Subnet{{az_letter}}Private
+      RouteTableId: !Ref RouteTable{{az_letter}}Private
   SubnetNetworkAclAssociation{{az_letter}}Private:
     Type: 'AWS::EC2::SubnetNetworkAclAssociation'
     Properties:
       SubnetId: !Ref Subnet{{az_letter}}Private
       NetworkAclId: !Ref NetworkAclPrivate
+  {% endif %}
+
+  {% if az_letter in private_az_with_nat_letters %}
   EIP{{az_letter}}:
     Type: 'AWS::EC2::EIP'
     Properties:
@@ -180,7 +194,10 @@ Resources:
       RouteTableId: !Ref RouteTable{{az_letter}}Private
       DestinationCidrBlock: '0.0.0.0/0'
       NatGatewayId: !Ref NATGateway{{az_letter}}
+  {% endif %}
   {% endfor %}
+
+  {% if private_az_letters | length > 0 %}
   VPCEndpointSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -195,8 +212,7 @@ Resources:
     Properties:
       VpcEndpointType: Interface
       SubnetIds:
-        {% for i in range(0, az_count) %}
-        {% set az_letter = ['A', 'B', 'C', 'D'][i] %}
+        {% for az_letter in private_az_letters %}
         - !Ref Subnet{{az_letter}}Private
         {% endfor %}
       SecurityGroupIds:
@@ -209,8 +225,7 @@ Resources:
     Properties:
       VpcEndpointType: Gateway
       RouteTableIds:
-        {% for i in range(0, az_count) %}
-        {% set az_letter = ['A', 'B', 'C', 'D'][i] %}
+        {% for az_letter in private_az_letters %}
         - !Ref RouteTable{{az_letter}}Private
         {% endfor %}
       ServiceName: !Join [ '', [ 'com.amazonaws.', { 'Ref': 'AWS::Region' }, '.s3' ] ]
@@ -220,8 +235,7 @@ Resources:
     Properties:
       VpcEndpointType: Interface
       SubnetIds:
-        {% for i in range(0, az_count) %}
-        {% set az_letter = ['A', 'B', 'C', 'D'][i] %}
+        {% for az_letter in private_az_letters %}
         - !Ref Subnet{{az_letter}}Private
         {% endfor %}
       SecurityGroupIds:
@@ -234,8 +248,7 @@ Resources:
     Properties:
       VpcEndpointType: Interface
       SubnetIds:
-        {% for i in range(0, az_count) %}
-        {% set az_letter = ['A', 'B', 'C', 'D'][i] %}
+        {% for az_letter in private_az_letters %}
         - !Ref Subnet{{az_letter}}Private
         {% endfor %}
       SecurityGroupIds:
@@ -248,51 +261,121 @@ Resources:
     Properties:
       GroupDescription: 'ECS Tasks with no ingress'
       VpcId: !Ref VPC
+  {% endif %}
 Outputs:
   TemplateVersion:
-    Description: 'Template version.'
-    Value: '9.0.0'
+    Description: 'Template version'
+    Value: '10.0.0'
   StackName:
     Description: 'Stack name'
     Value: !Sub '${AWS::StackName}'
   AZs:
-    Description: 'AZs'
-    Value: {{az_count}}
+    Description: 'Count of Availability Zones'
+    Value: {{all_az_letters | length}}
     Export:
       Name: !Sub '${AWS::StackName}-AZs'
-  {% for i in range(0, az_count) %}
-  {% set az_letter = ['A', 'B', 'C', 'D'][i] %}
-  AZ{{az_letter}}:
-    Description: 'AZ of {{az_letter}}'
+  PublicAZs:
+    Description: 'Count of Availability Zones with Public Subnets'
+    Value: {{public_az_letters | length}}
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicAZs'
+  PrivateAZs:
+    Description: 'Count of Availability Zones with Private Subnets'
+    Value: {{private_az_letters | length}}
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateAZs'
+  PrivateWithNatAZs:
+    Description: 'Count of Availability Zones with Private Subnets and NAT Gateways'
+    Value: {{private_az_letters | length}}
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateWithNatAZs'
+
+  {# Workaround to keep counters in loops:
+     https://stackoverflow.com/questions/7537439/how-to-increment-a-variable-on-a-for-loop-in-jinja-template
+  #}
+  {% set public_index = [0] %}
+  {% set private_index = [0] %}
+  {% set private_with_nat_index = [0] %}
+  {% for i in range(0, all_az_letters | length) %}
+  {% set az_letter = all_az_letters[i] %}
+  AZ{{i + 1}}:
+    Description: 'Availability Zone {{i + 1}}'
     Value: !Select [{{i}}, !GetAZs '']
     Export:
-      Name: !Sub '${AWS::StackName}-AZ{{az_letter}}'
+      Name: !Sub '${AWS::StackName}-AZ{{i + 1}}'
+  {% if az_letter in public_az_letters %}
+    {% if public_index.append(public_index.pop() + 1) %}{% endif %}
   Subnet{{az_letter}}Public:
     Description: 'Public subnet {{az_letter}}'
     Value: !Ref Subnet{{az_letter}}Public
     Export:
       Name: !Sub '${AWS::StackName}-Subnet{{az_letter}}Public'
+  Subnet{{public_index[0]}}Public:
+    Description: 'Public subnet {{public_index[0]}} ({{az_letter}})'
+    Value: !Ref Subnet{{az_letter}}Public
+    Export:
+      Name: !Sub '${AWS::StackName}-Subnet{{public_index[0]}}Public'
   RouteTable{{az_letter}}Public:
     Description: 'Public route table {{az_letter}}'
     Value: !Ref RouteTable{{az_letter}}Public
     Export:
       Name: !Sub '${AWS::StackName}-RouteTable{{az_letter}}Public'
+  RouteTable{{public_index[0]}}Public:
+    Description: 'Public route table {{public_index[0]}} ({{az_letter}})'
+    Value: !Ref RouteTable{{az_letter}}Public
+    Export:
+      Name: !Sub '${AWS::StackName}-RouteTable{{public_index[0]}}Public'
+  {% endif %}
+
+  {% if az_letter in private_az_letters %}
+    {% if private_index.append(private_index.pop() + 1) %}{% endif %}
   Subnet{{az_letter}}Private:
     Description: 'Private subnet {{az_letter}}'
     Value: !Ref Subnet{{az_letter}}Private
     Export:
       Name: !Sub '${AWS::StackName}-Subnet{{az_letter}}Private'
+  Subnet{{private_index[0]}}Private:
+    Description: 'Private subnet {{private_index[0]}} ({{az_letter}})'
+    Value: !Ref Subnet{{az_letter}}Private
+    Export:
+      Name: !Sub '${AWS::StackName}-Subnet{{private_index[0]}}Private'
   RouteTable{{az_letter}}Private:
     Description: 'Private route table {{az_letter}}'
     Value: !Ref RouteTable{{az_letter}}Private
     Export:
       Name: !Sub '${AWS::StackName}-RouteTable{{az_letter}}Private'
+  RouteTable{{private_index[0]}}Private:
+    Description: 'Private route table {{private_index[0]}} ({{az_letter}})'
+    Value: !Ref RouteTable{{az_letter[0]}}Private
+    Export:
+      Name: !Sub '${AWS::StackName}-RouteTable{{private_index[0]}}Private'
+  {% endif %}
+
+  {% if az_letter in private_az_with_nat_letters %}
+    {% if private_with_nat_index.append(private_with_nat_index.pop() + 1) %}{% endif %}
   NATGateway{{az_letter}}:
     Description: 'NAT Gateway {{az_letter}}'
     Value: !Ref NATGateway{{az_letter}}
     Export:
       Name: !Sub '${AWS::StackName}-NATGateway{{az_letter}}'
+  NATGateway{{private_with_nat_index[0]}}:
+    Description: 'NAT Gateway {{private_with_nat_index[0]}} ({{az_letter}})'
+    Value: !Ref NATGateway{{az_letter}}
+    Export:
+      Name: !Sub '${AWS::StackName}-NATGateway{{private_with_nat_index[0]}}'
+  EIP{{az_letter}}:
+    Description: 'EIP {{az_letter}}'
+    Value: !Ref EIP{{az_letter}}
+    Export:
+      Name: !Sub '${AWS::StackName}-EIP{{az_letter}}'
+  EIP{{private_with_nat_index[0]}}:
+    Description: 'EIP {{private_with_nat_index[0]}} ({{az_letter}})'
+    Value: !Ref EIP{{az_letter}}
+    Export:
+      Name: !Sub '${AWS::StackName}-EIP{{private_with_nat_index[0]}}'
+  {% endif %}
   {% endfor %}
+
   CidrBlock:
     Description: 'The set of IP addresses for the VPC'
     Value: !GetAtt 'VPC.CidrBlock'
@@ -303,31 +386,48 @@ Outputs:
     Value: !Ref VPC
     Export:
       Name: !Sub '${AWS::StackName}-VPC'
-  SubnetsPublic:
-    Description: 'Public subnets'
-    Value: !Join [',', [{% for i in range(0, az_count) %}{% set az_letter = ['A', 'B', 'C', 'D'][i] %}!Ref Subnet{{az_letter}}Public{% if not loop.last %}, {% endif %}{% endfor %}]]
-    Export:
-      Name: !Sub '${AWS::StackName}-SubnetsPublic'
-  SubnetsPrivate:
-    Description: 'Private subnets'
-    Value: !Join [',', [{% for i in range(0, az_count) %}{% set az_letter = ['A', 'B', 'C', 'D'][i] %}!Ref Subnet{{az_letter}}Private{% if not loop.last %}, {% endif %}{% endfor %}]]
-    Export:
-      Name: !Sub '${AWS::StackName}-SubnetsPrivate'
-  RouteTablesPublic:
-    Description: 'Public route tables'
-    Value: !Join [',', [{% for i in range(0, az_count) %}{% set az_letter = ['A', 'B', 'C', 'D'][i] %}!Ref RouteTable{{az_letter}}Public{% if not loop.last %}, {% endif %}{% endfor %}]]
-    Export:
-      Name: !Sub '${AWS::StackName}-RouteTablesPublic'
-  RouteTablesPrivate:
-    Description: 'Private route tables'
-    Value: !Join [',', [{% for i in range(0, az_count) %}{% set az_letter = ['A', 'B', 'C', 'D'][i] %}!Ref RouteTable{{az_letter}}Private{% if not loop.last %}, {% endif %}{% endfor %}]]
-    Export:
-      Name: !Sub '${AWS::StackName}-RouteTablesPrivate'
+  {% if public_az_letters | length > 0 %}
   InternetGateway:
     Description: 'Internet gateway'
     Value: !Ref InternetGateway
     Export:
       Name: !Sub '${AWS::StackName}-InternetGateway'
+  SubnetsPublic:
+    Description: 'Public subnets'
+    Value: !Join [',', [{% for az_letter in public_az_letters %}!Ref Subnet{{az_letter}}Public{% if not loop.last %}, {% endif %}{% endfor %}]]
+    Export:
+      Name: !Sub '${AWS::StackName}-SubnetsPublic'
+  RouteTablesPublic:
+    Description: 'Public route tables'
+    Value: !Join [',', [{% for az_letter in public_az_letters %}!Ref RouteTable{{az_letter}}Public{% if not loop.last %}, {% endif %}{% endfor %}]]
+    Export:
+      Name: !Sub '${AWS::StackName}-RouteTablesPublic'
+  {% endif %}
+  {% if private_az_letters | length > 0 %}
+  SubnetsPrivate:
+    Description: 'Private subnets'
+    Value: !Join [',', [{% for az_letter in private_az_letters %}!Ref Subnet{{az_letter}}Private{% if not loop.last %}, {% endif %}{% endfor %}]]
+    Export:
+      Name: !Sub '${AWS::StackName}-SubnetsPrivate'
+  RouteTablesPrivate:
+    Description: 'Private route tables'
+    Value: !Join [',', [{% for az_letter in private_az_letters %}!Ref RouteTable{{az_letter}}Private{% if not loop.last %}, {% endif %}{% endfor %}]]
+    Export:
+      Name: !Sub '${AWS::StackName}-RouteTablesPrivate'
+  {% endif %}
+  {% if private_with_nat_az_letters | length > 0 %}
+  SubnetsPrivateWithNat:
+    Description: 'Private subnets with NAT gateways'
+    Value: !Join [',', [{% for az_letter in private_az_with_nat_letters %}!Ref Subnet{{az_letter}}Private{% if not loop.last %}, {% endif %}{% endfor %}]]
+    Export:
+      Name: !Sub '${AWS::StackName}-SubnetsPrivateWithNat'
+  RouteTablesPrivateWithNat:
+    Description: 'Private route tables for subnets with NAT gateways'
+    Value: !Join [',', [{% for az_letter in private_with_nat_az_letters %}!Ref RouteTable{{az_letter}}Private{% if not loop.last %}, {% endif %}{% endfor %}]]
+    Export:
+      Name: !Sub '${AWS::StackName}-RouteTablesPrivateWithNat'
+  {% endif %}
+
   DefaultTaskSecurityGroup:
     Description: 'Default security group for ECS tasks, with no inbound access'
     Value: !Ref DefaultTaskSecurityGroup
