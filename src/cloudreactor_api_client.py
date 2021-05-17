@@ -21,8 +21,8 @@ class CloudReactorApiClient(object):
 
     def authenticate(self):
         data = {
-          'username': self.username,
-          'password': self.password,
+            'username': self.username,
+            'password': self.password,
         }
 
         r = self.http.request('POST',
@@ -109,18 +109,17 @@ class CloudReactorApiClient(object):
             raise RuntimeError(message)
 
 
-
 if __name__ == '__main__':
     client = CloudReactorApiClient(
-            username=os.environ['CLOUDREACTOR_USERNAME'],
-            password=os.environ['CLOUDREACTOR_PASSWORD'])
+        username=os.environ['CLOUDREACTOR_USERNAME'],
+        password=os.environ['CLOUDREACTOR_PASSWORD'])
 
     groups = client.list_groups()['results']
 
     print(f"{groups=}")
 
     if len(groups) == 0:
-        print('No groups found, not listing Run Environments.');
+        print('No groups found, not listing Run Environments.')
 
     run_environments = client.list_run_environments(groups[0]['id'])
 

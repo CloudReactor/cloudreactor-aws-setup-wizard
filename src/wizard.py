@@ -195,10 +195,10 @@ class Wizard(object):
 
             if v is not None:
                 if attr == 'aws_access_key':
-                  if self.aws_account_id:
-                      v += ' (validated)'
-                  else:
-                      v += ' (unvalidated)'
+                    if self.aws_account_id:
+                        v += ' (validated)'
+                    else:
+                        v += ' (unvalidated)'
                 if attr == 'aws_secret_key':
                     if v != NO_ACCESS_KEY:
                         v = self.obfuscate_string(v)
@@ -411,8 +411,7 @@ The access key and secret key are not sent to CloudReactor.
                 self.save()
                 return self.aws_access_key
 
-
-        q = f'What AWS access key do you want to use for this wizard?'
+        q = 'What AWS access key do you want to use for this wizard?'
 
         if default_aws_access_key:
             q += f" [{default_aws_access_key}]"
@@ -493,7 +492,7 @@ The access key and secret key are not sent to CloudReactor.
             for m in ['staging', 'stage', 'stg', 'production', 'prod', 'prd', 'development', 'dev', 'test']:
                 index = s.find(m)
                 if index >= 0:
-                    return s[index:index+len(m)]
+                    return s[index:index + len(m)]
 
         return DEFAULT_DEPLOYMENT_ENVIRONMENT_NAME
 
@@ -582,7 +581,7 @@ The access key and secret key are not sent to CloudReactor.
             return self.uploaded_stack_id
 
     def ask_for_stack_name(self, default_stack_name: str,
-            old_uploaded_stack_name : Optional[str],
+            old_uploaded_stack_name: Optional[str],
             create_or_update_message: Optional[str], purpose: str,
             cf_client=None) -> Optional[Tuple[str, Optional[Any], bool]]:
         if not cf_client:
@@ -1595,9 +1594,9 @@ which allows outbound access to the public internet.
         q = 'What is your CloudReactor password?'
 
         if old_password:
-            q += f" [saved password]"
+            q += " [saved password]"
 
-        password =  questionary.password(q).ask()
+        password = questionary.password(q).ask()
 
         if password is None:
             return None
@@ -1757,7 +1756,7 @@ which allows outbound access to the public internet.
             q = 'What do you want to name your Run Environment? '
 
             if default_run_environment_name:
-              q += f"[{default_run_environment_name}]"
+                q += f"[{default_run_environment_name}]"
 
             run_environment_name = questionary.text(q).ask()
 
@@ -1808,7 +1807,7 @@ which allows outbound access to the public internet.
                 print(f"Updating Run Environment '{run_environment_name}' ...\n")
 
                 saved_run_environment = cr_api_client.update_run_environment(
-                        uuid=run_environment_uuid, data=data)
+                    uuid=run_environment_uuid, data=data)
             else:
                 print(f"Creating Run Environment '{run_environment_name}'.\n")
                 saved_run_environment = cr_api_client.create_run_environment(data=data)
@@ -1836,8 +1835,7 @@ which allows outbound access to the public internet.
         if not self.subnets or not self.security_groups:
             print("You may optionally add default subnets and security groups there.")
 
-        print(
-f"""
+        print(f"""
 You can set secrets in Secrets Manager with the name prefix:
 
 CloudReactor/{self.deployment_environment}/common/
@@ -1849,7 +1847,7 @@ you should install your CloudReactor API key with a name of:
 
 CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
 
-""")
+        """)
 
         print()
 
