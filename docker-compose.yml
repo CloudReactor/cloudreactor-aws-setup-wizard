@@ -61,4 +61,4 @@ services:
 
   dev-shell:
     <<: *dev-base
-    command: bash
+    entrypoint: bash
