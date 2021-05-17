@@ -4,13 +4,13 @@
 #
 #    pip-compile --allow-unsafe --generate-hashes
 #
-boto3==1.17.46 \
-    --hash=sha256:070c1c4fb75cb3d599e2eb520a50d8e763080f6c06d9de77e9773c36442f23e9 \
-    --hash=sha256:5dee15bf961ea584d681fae42c50034c839717e7454c3da90cb57a6c52e97532
+boto3==1.17.73 \
+    --hash=sha256:13cfe0e3ae1bdc7baf4272b1814a7e760fbb508b19d6ac3f472a6bbd64baad61 \
+    --hash=sha256:ce08b88a2d7a0ad8edb385f84ea4914296fee6813c66ebf0def956d5278de793
     # via -r requirements.in
-botocore==1.20.46 \
-    --hash=sha256:50bbc3e9341c7daa8219db98c38f26012a151ca88fa260148e5bf3adcbcb9541 \
-    --hash=sha256:8cd22cd9dd3852c58dad714950b3fb62316d73c18c4eaf90eda1c677ab5e379b
+botocore==1.20.73 \
+    --hash=sha256:4b4aa58c61d4b125bc6ec1597924b2749e19de8f2c9a374ac087aa2561e71828 \
+    --hash=sha256:69dc0b6fdc0855f5a4f8b1d29c96b9cec44e71054fea0f968e5904d6ccfd4fd9
     # via
     #   boto3
     #   s3transfer
@@ -125,9 +125,9 @@ questionary==1.9.0 \
     --hash=sha256:a050fdbb81406cddca679a6f492c6272da90cb09988963817828f697cf091c55 \
     --hash=sha256:fa50c06af4e3826d986efbc90be16e42ff367a634e6a169e42a3f9fccd90648b
     # via -r requirements.in
-s3transfer==0.3.6 \
-    --hash=sha256:5d48b1fd2232141a9d5fb279709117aaba506cacea7f86f11bc392f06bfa8fc2 \
-    --hash=sha256:c5dadf598762899d8cfaecf68eba649cd25b0ce93b6c954b156aaa3eed160547
+s3transfer==0.4.2 \
+    --hash=sha256:9b3752887a2880690ce628bc263d6d13a3864083aeacff4890c1c9839a5eb0bc \
+    --hash=sha256:cb022f4b16551edebbb31a377d3f09600dbada7363d8c5db7976e7f47732e1b2
     # via boto3
 six==1.15.0 \
     --hash=sha256:30639c035cdb23534cd4aa2dd52c3bf48f06e5f4a941509c8bafd8ce11080259 \
