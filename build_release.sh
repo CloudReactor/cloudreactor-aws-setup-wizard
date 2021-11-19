@@ -10,8 +10,8 @@ docker build -t aws-setup-wizard -t \
 docker login
 docker tag aws-setup-wizard cloudreactor/aws-setup-wizard:latest
 docker push cloudreactor/aws-setup-wizard:latest
-docker tag aws-setup-wizard cloudreactor/aws-setup-wizard:1.2.0
-docker push cloudreactor/aws-setup-wizard:1.2.0
+docker tag aws-setup-wizard cloudreactor/aws-setup-wizard:1.2.1
+docker push cloudreactor/aws-setup-wizard:1.2.1
 docker tag aws-setup-wizard cloudreactor/aws-setup-wizard:1.2
 docker push cloudreactor/aws-setup-wizard:1.2
 docker tag aws-setup-wizard cloudreactor/aws-setup-wizard:1
