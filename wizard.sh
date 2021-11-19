@@ -9,4 +9,4 @@ if [ -z "$AWS_DEFAULT_REGION" ]; then export AWS_DEFAULT_REGION=''; fi
 if [ -z "$AWS_ACCESS_KEY_ID" ]; then export AWS_ACCESS_KEY_ID=''; fi
 if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then export AWS_SECRET_ACCESS_KEY=''; fi
 
-docker-compose run --rm wizard "$@"
+docker compose run --rm wizard "$@"
