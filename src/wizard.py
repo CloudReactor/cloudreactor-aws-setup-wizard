@@ -442,12 +442,13 @@ The access key and secret key are not sent to CloudReactor.
         return self.aws_access_key
 
     def ask_for_aws_secret_key(self) -> Optional[str]:
-        if self.aws_secret_key == NO_ACCESS_KEY:
+        if self.aws_access_key == NO_ACCESS_KEY:
             print('You are not using an access key, so there is no need to set a secret key.')
             print('You may switch to using an access key by editing the AWS access key setting.')
             return NO_ACCESS_KEY
 
-        old_aws_secret_key = self.aws_secret_key
+        old_aws_secret_key = None if self.aws_secret_key == NO_ACCESS_KEY \
+                else self.aws_secret_key
         env_aws_secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
         default_aws_secret_key = old_aws_secret_key or env_aws_secret_key
 
