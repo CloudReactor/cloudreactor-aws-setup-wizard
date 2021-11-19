@@ -1,5 +1,12 @@
 # cloudreactor-aws-setup-wizard
 
+<p>
+  <a href="https://hub.docker.com/repository/docker/cloudreactor/aws-setup-wizard">
+    <img src="https://img.shields.io/docker/cloud/build/cloudreactor/aws-setup-wizard?style=flat-square" alt="Docker Build Status" >
+  </a>
+  <img src="https://img.shields.io/github/license/CloudReactor/cloudreactor-aws-setup-wizard.svg?style=flat-square" alt="License">
+</p>
+
 A command-line wizard to setup customer environments for running tasks managed by CloudReactor
 
 ## What this can do (pick and choose any or all):
