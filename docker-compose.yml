@@ -48,6 +48,21 @@ services:
     <<: *service-base
     entrypoint: bash
 
+  # To update requirements.txt:
+  # docker compose run --rm pip-compile > requirements.txt
+  pip-compile: &pip-compile-base
+    image: aws-setup-wizard
+    entrypoint: pip-compile --allow-unsafe --generate-hashes --output-file=-
+
+  # To update dev-requirements.txt:
+  # docker compose run --rm pip-compile-dev > dev-requirements.txt
+  pip-compile-dev:
+    <<: *pip-compile-base
+    image: aws-setup-wizard_dev
+    build:
+      dockerfile: Dockerfile-dev
+    command: dev-requirements.in
+
   flake8:
     <<: *dev-base
 

@@ -2,4 +2,5 @@
 mypy>=0.812
 boto3-stubs[essential]>=1.17.49.0
 flake8>=3.8.2
+pre-commit
 safety>=1.9.0

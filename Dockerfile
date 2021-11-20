@@ -11,6 +11,7 @@ RUN pip install --no-input --no-cache-dir pip-tools==5.5.0 MarkupSafe==1.1.1 \
   requests==2.24.0
 
 COPY requirements.in .
+COPY requirements.txt .
 
 RUN pip-compile --allow-unsafe --generate-hashes \
   requirements.in --output-file requirements.txt

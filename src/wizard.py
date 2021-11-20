@@ -1,99 +1,100 @@
-from typing import cast, Any, Optional, Tuple
-
 import argparse
-from datetime import datetime
-import os
 import logging
+import os
 import random
 import re
 import string
 import time
 import urllib.parse
-import yaml
+from datetime import datetime
+from typing import Any, Optional, Tuple, cast
 
-import jsonpickle
 import boto3
+import jsonpickle
 import questionary
-from questionary import Choice
-from jinja2 import Environment, FileSystemLoader
-
+import yaml
 from botocore.exceptions import ClientError
+from jinja2 import Environment, FileSystemLoader
+from questionary import Choice
 
 from cloudreactor_api_client import CloudReactorApiClient
 
-DEFAULT_LOG_LEVEL = 'ERROR'
-SAVED_STATE_FILENAME = './saved_state/saved_settings.json'
-DEFAULT_SUFFIX = ' (Default)'
-UNSET_STRING = '(Not Set)'
-EMPTY_LIST_STRING = '(Empty list, to be entered manually later)'
-HELP_MESSAGE = 'Please contact support@cloudreactor.io for help.'
+DEFAULT_LOG_LEVEL = "ERROR"
+SAVED_STATE_FILENAME = "./saved_state/saved_settings.json"
+DEFAULT_SUFFIX = " (Default)"
+UNSET_STRING = "(Not Set)"
+EMPTY_LIST_STRING = "(Empty list, to be entered manually later)"
+HELP_MESSAGE = "Please contact support@cloudreactor.io for help."
 
 AWS_REGIONS = [
-    'us-east-1',
-    'us-east-2',
-    'us-west-1',
-    'us-west-2',
-    'us-gov-east-1',
-    'us-gov-west-1',
-    'ap-west-1',
-    'ap-south-1',
-    'ap-northeast-1',
-    'ap-northeast-2',
-    'ap-northeast-3',
-    'eu-central-1',
-    'eu-west-1',
-    'eu-west-2',
-    'eu-west-3',
-    'eu-north-1',
-    'me-south-1',
-    'sa-east-1',
-    'ca-central-1',
-    'cn-north-1',
-    'cn-northwest-1',
+    "us-east-1",
+    "us-east-2",
+    "us-west-1",
+    "us-west-2",
+    "us-gov-east-1",
+    "us-gov-west-1",
+    "ap-west-1",
+    "ap-south-1",
+    "ap-northeast-1",
+    "ap-northeast-2",
+    "ap-northeast-3",
+    "eu-central-1",
+    "eu-west-1",
+    "eu-west-2",
+    "eu-west-3",
+    "eu-north-1",
+    "me-south-1",
+    "sa-east-1",
+    "ca-central-1",
+    "cn-north-1",
+    "cn-northwest-1",
 ]
 
-DEFAULT_AWS_REGION = 'us-west-2'
-NO_ACCESS_KEY = 'none'
+DEFAULT_AWS_REGION = "us-west-2"
+NO_ACCESS_KEY = "none"
 
-DEFAULT_RUN_ENVIRONMENT_NAME = 'staging'
-CREATE_NEW_ECS_CLUSTER_CHOICE = 'Create new ECS cluster ...'
-ECS_CLUSTER_NAME_REGEX = re.compile(r'[a-zA-Z][-a-zA-Z0-9]{0,254}')
-DEFAULT_ECS_CLUSTER_NAME = 'staging'
+DEFAULT_RUN_ENVIRONMENT_NAME = "staging"
+CREATE_NEW_ECS_CLUSTER_CHOICE = "Create new ECS cluster ..."
+ECS_CLUSTER_NAME_REGEX = re.compile(r"[a-zA-Z][-a-zA-Z0-9]{0,254}")
+DEFAULT_ECS_CLUSTER_NAME = "staging"
 
-DEFAULT_DEPLOYMENT_ENVIRONMENT_NAME = 'staging'
+DEFAULT_DEPLOYMENT_ENVIRONMENT_NAME = "staging"
 
 KEY_LENGTH = 32
 
-CLOUDFORMATION_STACK_NAME_REGEX = re.compile(r'[a-zA-Z][-a-zA-Z0-9]{0,127}')
-CLOUDFORMATION_IN_PROGRESS_STATUSES = set([
-    'CREATE_IN_PROGRESS', 'UPDATE_IN_PROGRESS',
-    'UPDATE_COMPLETE_CLEANUP_IN_PROGRESS',
-    'IMPORT_IN_PROGRESS'
-])
-CLOUDFORMATION_SUCCESSFUL_STATUSES = set([
-    'CREATE_COMPLETE', 'UPDATE_COMPLETE', 'IMPORT_COMPLETE'
-])
+CLOUDFORMATION_STACK_NAME_REGEX = re.compile(r"[a-zA-Z][-a-zA-Z0-9]{0,127}")
+CLOUDFORMATION_IN_PROGRESS_STATUSES = set(
+    [
+        "CREATE_IN_PROGRESS",
+        "UPDATE_IN_PROGRESS",
+        "UPDATE_COMPLETE_CLEANUP_IN_PROGRESS",
+        "IMPORT_IN_PROGRESS",
+    ]
+)
+CLOUDFORMATION_SUCCESSFUL_STATUSES = set(
+    ["CREATE_COMPLETE", "UPDATE_COMPLETE", "IMPORT_COMPLETE"]
+)
 
 
 def print_banner():
-    with open('banner.txt') as f:
+    with open("banner.txt") as f:
         print(f.read())
 
 
 class Wizard(object):
-    MODE_INTERVIEW = 'interview'
-    MODE_EDIT = 'edit'
+    MODE_INTERVIEW = "interview"
+    MODE_EDIT = "edit"
 
     NUMBER_TO_PROPERTY = {
-        '1': ['aws_region', 'AWS region'],
-        '2': ['aws_access_key', 'AWS access key'],
-        '3': ['aws_secret_key', 'AWS secret key'],
-        '4': ['cluster_arn', 'AWS ECS Cluster'],
-        '5': ['subnets', 'Subnet(s)'],
-        '6': ['security_groups', 'Security group(s)'],
-        '7': ['deployment_environment', 'Deployment Environment name'],
-        '8': ['stack_name', 'CloudReactor permissions CloudFormation stack name'],
-        '9': ['cloudreactor_credentials', 'CloudReactor credentials'],
+        "1": ["aws_region", "AWS region"],
+        "2": ["aws_access_key", "AWS access key"],
+        "3": ["aws_secret_key", "AWS secret key"],
+        "4": ["cluster_arn", "AWS ECS Cluster"],
+        "5": ["subnets", "Subnet(s)"],
+        "6": ["security_groups", "Security group(s)"],
+        "7": ["deployment_environment", "Deployment Environment name"],
+        "8": ["stack_name", "CloudReactor permissions CloudFormation stack name"],
+        "9": ["cloudreactor_credentials", "CloudReactor credentials"],
     }
 
     def __init__(self, cloudreactor_deployment_environment: str) -> None:
@@ -130,11 +131,15 @@ class Wizard(object):
 
         self.mode = Wizard.MODE_INTERVIEW
 
-        with open('wizard_config.yml') as f:
+        with open("wizard_config.yml") as f:
             config_dict = yaml.safe_load(f)
-            self.role_template_major_version = config_dict['role_template_major_version']
+            self.role_template_major_version = config_dict[
+                "role_template_major_version"
+            ]
 
-        logging.debug(f"Role template major version = {self.role_template_major_version}")
+        logging.debug(
+            f"Role template major version = {self.role_template_major_version}"
+        )
 
     def reset(self) -> None:
         self.aws_region = None
@@ -195,22 +200,22 @@ class Wizard(object):
             v = self.__dict__[attr]
 
             if v is not None:
-                if attr == 'aws_access_key':
+                if attr == "aws_access_key":
                     if self.aws_account_id:
-                        v += ' (validated)'
+                        v += " (validated)"
                     else:
-                        v += ' (unvalidated)'
-                if attr == 'aws_secret_key':
+                        v += " (unvalidated)"
+                if attr == "aws_secret_key":
                     if v != NO_ACCESS_KEY:
                         v = self.obfuscate_string(v)
                     if self.aws_account_id:
-                        v += ' (validated)'
+                        v += " (validated)"
                     else:
-                        v += ' (unvalidated)'
-                elif attr == 'cloudreactor_credentials':
+                        v += " (unvalidated)"
+                elif attr == "cloudreactor_credentials":
                     v = f"{v[0]} / [saved password]"
 
-            elif attr in ['subnets', 'security_groups']:
+            elif attr in ["subnets", "security_groups"]:
                 v = self.list_to_string(v)
 
             choices.append(f"{n}. {arr[1]}: {str(v or UNSET_STRING)}")
@@ -227,13 +232,15 @@ class Wizard(object):
                 rv = self.wait_for_role_stack_upload()
 
             if rv is None:
-                is_mode_interview = (self.mode == Wizard.MODE_INTERVIEW)
+                is_mode_interview = self.mode == Wizard.MODE_INTERVIEW
 
                 if is_mode_interview:
                     if first_run:
                         self.print_menu()
                     else:
-                        rv = questionary.confirm("Continue step-by-step interview? (n switches to editing settings)").ask()
+                        rv = questionary.confirm(
+                            "Continue step-by-step interview? (n switches to editing settings)"
+                        ).ask()
                         if not rv:
                             self.mode = Wizard.MODE_EDIT
                             self.save()
@@ -273,7 +280,9 @@ class Wizard(object):
         return None
 
     def handle_all_settings_entered(self):
-        rv = questionary.confirm("All settings have been entered. Proceed with CloudReactor setup?").ask()
+        rv = questionary.confirm(
+            "All settings have been entered. Proceed with CloudReactor setup?"
+        ).ask()
 
         # TODO: check saved state in case we uploaded already
         if rv:
@@ -290,14 +299,16 @@ class Wizard(object):
         choices.append(f"{n + 2}. Quit")
 
         selected = questionary.select(
-            "Which setting do you want to edit?",
-            choices=choices).ask()
+            "Which setting do you want to edit?", choices=choices
+        ).ask()
 
         if selected is None:
-            print("\nExiting for now. You can finish the setup process later by running this wizard again.\n")
+            print(
+                "\nExiting for now. You can finish the setup process later by running this wizard again.\n"
+            )
             exit(0)
 
-        dot_index = selected.find('.')
+        dot_index = selected.find(".")
         number = int(selected[:dot_index])
 
         if number == n + 1:
@@ -326,52 +337,58 @@ class Wizard(object):
         arr = Wizard.NUMBER_TO_PROPERTY[str(n)]
         p = arr[0]
 
-        if p == 'aws_region':
+        if p == "aws_region":
             return self.ask_for_aws_region()
-        elif p == 'aws_access_key':
+        elif p == "aws_access_key":
             return self.ask_for_aws_access_key()
-        elif p == 'aws_secret_key':
+        elif p == "aws_secret_key":
             return self.ask_for_aws_secret_key()
-        elif p == 'stack_name':
+        elif p == "stack_name":
             return self.ask_for_role_stack_name_and_upload()
-        elif p == 'subnets':
+        elif p == "subnets":
             return self.ask_for_subnets()
-        elif p == 'security_groups':
+        elif p == "security_groups":
             return self.ask_for_security_groups()
-        elif p == 'deployment_environment':
+        elif p == "deployment_environment":
             return self.ask_for_deployment_environment()
-        elif p == 'cloudreactor_credentials':
+        elif p == "cloudreactor_credentials":
             return self.ask_for_cloudreactor_credentials()
-        elif p == 'cluster_arn':
+        elif p == "cluster_arn":
             return self.ask_for_ecs_cluster_arn()
         else:
             print(f"{n} is not a valid choice. Please try another choice. [{p}]")
             return None
 
     def ask_for_aws_region(self) -> Optional[str]:
-        print("""
+        print(
+            """
 CloudReactor must be setup for each AWS region you wish to run Tasks in.
 Ensure you choose the region where the AWS resources your Tasks need
 to access are located.
-        """)
+        """
+        )
 
         old_aws_region = self.aws_region
-        default_aws_region = old_aws_region or os.environ.get('AWS_REGION') or \
-                             os.environ.get('AWS_DEFAULT_REGION')
+        default_aws_region = (
+            old_aws_region
+            or os.environ.get("AWS_REGION")
+            or os.environ.get("AWS_DEFAULT_REGION")
+        )
 
         choices = AWS_REGIONS
 
         if default_aws_region:
             choices = [default_aws_region + DEFAULT_SUFFIX] + choices
 
-        self.aws_region = questionary.select('Which AWS region will you run ECS tasks in?',
-                choices=choices).ask()
+        self.aws_region = questionary.select(
+            "Which AWS region will you run ECS tasks in?", choices=choices
+        ).ask()
 
         if self.aws_region is None:
             print("Skipping AWS region for now.\n")
             return None
 
-        self.aws_region = self.aws_region.replace(DEFAULT_SUFFIX, '')
+        self.aws_region = self.aws_region.replace(DEFAULT_SUFFIX, "")
 
         print(f"Using AWS region {self.aws_region}.\n")
 
@@ -382,7 +399,8 @@ to access are located.
         return self.aws_region
 
     def ask_for_aws_access_key(self) -> Optional[str]:
-        print("""
+        print(
+            """
 To allow this wizard to create AWS resources for you, it needs an AWS access key.
 The access key needs to have the following permissions:
 - Upload CloudFormation stack
@@ -392,18 +410,20 @@ The access key needs to have the following permissions:
 - Create VPCs, subnets, internet gateways, and security groups (if using the wizard to create a VPC)
 
 The access key and secret key are not sent to CloudReactor.
-""")
+"""
+        )
 
         old_aws_access_key = self.aws_access_key
-        default_aws_access_key = old_aws_access_key \
-                or os.environ.get('AWS_ACCESS_KEY_ID')
+        default_aws_access_key = old_aws_access_key or os.environ.get(
+            "AWS_ACCESS_KEY_ID"
+        )
 
         aws_account_id: Optional[str] = None
         if not default_aws_access_key:
             aws_account_id = self.validate_aws_access()
 
         if aws_account_id:
-            q = f'You already have access to the AWS account with ID {aws_account_id}. Do you want to to use your current access for this wizard?'
+            q = f"You already have access to the AWS account with ID {aws_account_id}. Do you want to to use your current access for this wizard?"
             rv = questionary.confirm(q).ask()
 
             if rv:
@@ -412,7 +432,7 @@ The access key and secret key are not sent to CloudReactor.
                 self.save()
                 return self.aws_access_key
 
-        q = 'What AWS access key do you want to use for this wizard?'
+        q = "What AWS access key do you want to use for this wizard?"
 
         if default_aws_access_key:
             q += f" [{default_aws_access_key}]"
@@ -443,22 +463,27 @@ The access key and secret key are not sent to CloudReactor.
 
     def ask_for_aws_secret_key(self) -> Optional[str]:
         if self.aws_access_key == NO_ACCESS_KEY:
-            print('You are not using an access key, so there is no need to set a secret key.')
-            print('You may switch to using an access key by editing the AWS access key setting.')
+            print(
+                "You are not using an access key, so there is no need to set a secret key."
+            )
+            print(
+                "You may switch to using an access key by editing the AWS access key setting."
+            )
             return NO_ACCESS_KEY
 
-        old_aws_secret_key = None if self.aws_secret_key == NO_ACCESS_KEY \
-                else self.aws_secret_key
-        env_aws_secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
+        old_aws_secret_key = (
+            None if self.aws_secret_key == NO_ACCESS_KEY else self.aws_secret_key
+        )
+        env_aws_secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
         default_aws_secret_key = old_aws_secret_key or env_aws_secret_key
 
-        q = 'What is the AWS secret key corresponding to your AWS access key?'
+        q = "What is the AWS secret key corresponding to your AWS access key?"
 
         if default_aws_secret_key:
             if old_aws_secret_key:
-                q += ' [previously saved]'
+                q += " [previously saved]"
             else:
-                q += ' [from your AWS_SECRET_ACCESS_KEY environment variable]'
+                q += " [from your AWS_SECRET_ACCESS_KEY environment variable]"
 
         aws_secret_key = questionary.password(q).ask()
 
@@ -491,19 +516,31 @@ The access key and secret key are not sent to CloudReactor.
             strings_to_match.append(self.cluster_arn.lower())
 
         for s in strings_to_match:
-            for m in ['staging', 'stage', 'stg', 'production', 'prod', 'prd', 'development', 'dev', 'test']:
+            for m in [
+                "staging",
+                "stage",
+                "stg",
+                "production",
+                "prod",
+                "prd",
+                "development",
+                "dev",
+                "test",
+            ]:
                 index = s.find(m)
                 if index >= 0:
-                    return s[index:index + len(m)]
+                    return s[index : index + len(m)]
 
         return DEFAULT_DEPLOYMENT_ENVIRONMENT_NAME
 
     def ask_for_deployment_environment(self) -> Optional[str]:
         old_deployment_environment = self.deployment_environment
-        default_deployment_environment = old_deployment_environment or \
-                self.make_default_deployment_environment_name()
+        default_deployment_environment = (
+            old_deployment_environment
+            or self.make_default_deployment_environment_name()
+        )
 
-        q = 'What do you want to name your deployment environment?'
+        q = "What do you want to name your deployment environment?"
 
         if default_deployment_environment:
             q += f" [{default_deployment_environment}]"
@@ -519,7 +556,9 @@ The access key and secret key are not sent to CloudReactor.
             if not deployment_environment:
                 return None
 
-        if old_deployment_environment and (deployment_environment != old_deployment_environment):
+        if old_deployment_environment and (
+            deployment_environment != old_deployment_environment
+        ):
             self.saved_run_environment_uuid = None
             self.clear_stack_upload_state()
 
@@ -530,16 +569,24 @@ The access key and secret key are not sent to CloudReactor.
 
     def ask_for_role_stack_name_and_upload(self) -> Optional[str]:
         if not self.deployment_environment:
-            print("You must set the deployment environment name before installing CloudReactor permissions.\n")
+            print(
+                "You must set the deployment environment name before installing CloudReactor permissions.\n"
+            )
             return None
 
-        print("To allow CloudReactor to run tasks on your behalf, you'll need to install an AWS CloudFormation stack that grants CloudReactor permissions to do so.")
-        print(f"To see the resources that will be added, please see {self.make_cloudformation_role_template_url()}")
+        print(
+            "To allow CloudReactor to run tasks on your behalf, you'll need to install an AWS CloudFormation stack that grants CloudReactor permissions to do so."
+        )
+        print(
+            f"To see the resources that will be added, please see {self.make_cloudformation_role_template_url()}"
+        )
 
-        cf_client = self.make_boto_client('cloudformation')
+        cf_client = self.make_boto_client("cloudformation")
 
         if not cf_client:
-            print("You must set your AWS credentials before installing a CloudFormation stack.\n")
+            print(
+                "You must set your AWS credentials before installing a CloudFormation stack.\n"
+            )
             return None
 
         default_stack_name = self.make_default_role_stack_name()
@@ -551,11 +598,12 @@ The access key and secret key are not sent to CloudReactor.
             old_uploaded_stack_name = self.stack_name
 
         t = self.ask_for_stack_name(
-                default_stack_name=default_stack_name,
-                old_uploaded_stack_name=old_uploaded_stack_name,
-                create_or_update_message="If you've never set up CloudReactor before or are creating a new Run Environment, you should install a new CloudFormation stack.",
-                purpose=' to grant CloudReactor permissions to control tasks',
-                cf_client=cf_client)
+            default_stack_name=default_stack_name,
+            old_uploaded_stack_name=old_uploaded_stack_name,
+            create_or_update_message="If you've never set up CloudReactor before or are creating a new Run Environment, you should install a new CloudFormation stack.",
+            purpose=" to grant CloudReactor permissions to control tasks",
+            cf_client=cf_client,
+        )
 
         if t is None:
             print("Skipping stack name for now.\n")
@@ -575,26 +623,32 @@ The access key and secret key are not sent to CloudReactor.
             rv = self.wait_for_role_stack_upload(cf_client=cf_client)
 
             if rv:
-                print('The CloudFormation stack installation was successful.')
+                print("The CloudFormation stack installation was successful.")
                 return rv
 
             return None
         else:
             return self.uploaded_stack_id
 
-    def ask_for_stack_name(self, default_stack_name: str,
-            old_uploaded_stack_name: Optional[str],
-            create_or_update_message: Optional[str], purpose: str,
-            cf_client=None) -> Optional[Tuple[str, Optional[Any], bool]]:
+    def ask_for_stack_name(
+        self,
+        default_stack_name: str,
+        old_uploaded_stack_name: Optional[str],
+        create_or_update_message: Optional[str],
+        purpose: str,
+        cf_client=None,
+    ) -> Optional[Tuple[str, Optional[Any], bool]]:
         if not cf_client:
-            cf_client = self.make_boto_client('cloudformation')
+            cf_client = self.make_boto_client("cloudformation")
 
         if not cf_client:
-            print("You must set your AWS credentials before installing a CloudFormation stack.\n")
+            print(
+                "You must set your AWS credentials before installing a CloudFormation stack.\n"
+            )
             return None
 
         existing_stacks = self.list_stacks(cf_client=cf_client)
-        existing_stack_names = [stack['name'] for stack in (existing_stacks or [])]
+        existing_stack_names = [stack["name"] for stack in (existing_stacks or [])]
 
         should_create = True
         if len(existing_stack_names) > 0:
@@ -604,20 +658,22 @@ The access key and secret key are not sent to CloudReactor.
                 print(create_or_update_message)
 
             selection = questionary.select(
-                f'Do you want to install a new CloudFormation stack{purpose} or update and use an existing one?',
-                choices=['Install a new stack', 'Update and use an existing stack']).ask()
+                f"Do you want to install a new CloudFormation stack{purpose} or update and use an existing one?",
+                choices=["Install a new stack", "Update and use an existing stack"],
+            ).ask()
 
             if selection is None:
                 return None
 
-            should_create = (selection.find('new') >= 0)
+            should_create = selection.find("new") >= 0
 
         if should_create:
             good_stack_name = None
             reuse_stack = False
             while not good_stack_name:
                 stack_name = questionary.text(
-                        f"What do you want to name the CloudFormation stack{purpose}? [{default_stack_name}]").ask()
+                    f"What do you want to name the CloudFormation stack{purpose}? [{default_stack_name}]"
+                ).ask()
 
                 if stack_name is None:
                     return None
@@ -630,9 +686,13 @@ The access key and secret key are not sent to CloudReactor.
                     good_stack_name = stack_name
                     reuse_stack = True
                 elif stack_name in existing_stack_names:
-                    print(f"The name '{stack_name}' conflicts with an existing stack name. Please choose another name.")
+                    print(
+                        f"The name '{stack_name}' conflicts with an existing stack name. Please choose another name."
+                    )
                 elif CLOUDFORMATION_STACK_NAME_REGEX.fullmatch(stack_name) is None:
-                    print(f"'{stack_name}' is not a valid CloudFormation stack name. Stack names can only contain alphanumeric characters and dashes, no underscores.")
+                    print(
+                        f"'{stack_name}' is not a valid CloudFormation stack name. Stack names can only contain alphanumeric characters and dashes, no underscores."
+                    )
                 else:
                     print(f"New stack will be named '{stack_name}'.\n")
                     good_stack_name = stack_name
@@ -640,34 +700,39 @@ The access key and secret key are not sent to CloudReactor.
             return stack_name, None, reuse_stack
         else:
             stack_name = questionary.select(
-                    "Which CloudFormation stack do you want to update and use?",
-                    choices=existing_stack_names).ask()
+                "Which CloudFormation stack do you want to update and use?",
+                choices=existing_stack_names,
+            ).ask()
 
             if stack_name is None:
                 return None
 
             selected_stack = None
             for stack in existing_stacks:
-                if stack.get('name') == stack_name:
+                if stack.get("name") == stack_name:
                     selected_stack = stack
 
             if selected_stack is None:
                 logging.error(f"Can't find existing stack '{stack_name}'!")
                 return None
 
-            existing_stack_status = selected_stack.get('status') or ''
+            existing_stack_status = selected_stack.get("status") or ""
 
-            if existing_stack_status.find('PROGRESS') >= 0:
-                print(f"Stack {stack_name} is still in progress with status '{existing_stack_status}', please try again later.\n")
+            if existing_stack_status.find("PROGRESS") >= 0:
+                print(
+                    f"Stack {stack_name} is still in progress with status '{existing_stack_status}', please try again later.\n"
+                )
                 self.uploaded_stack_id = None
                 return None
 
-            return stack_name, selected_stack['stack_id'], False
+            return stack_name, selected_stack["stack_id"], False
 
     def make_default_role_stack_name(self) -> str:
-        name = 'CloudReactor'
+        name = "CloudReactor"
 
-        if self.cloudreactor_deployment_environment and (self.cloudreactor_deployment_environment != 'production'):
+        if self.cloudreactor_deployment_environment and (
+            self.cloudreactor_deployment_environment != "production"
+        ):
             name += f"-CR-{cloudreactor_deployment_environment}"
 
         if self.deployment_environment:
@@ -679,7 +744,7 @@ The access key and secret key are not sent to CloudReactor.
         old_client = self.cloudreactor_api_client
         self.cloudreactor_api_client = None
 
-        with open(SAVED_STATE_FILENAME, 'w') as f:
+        with open(SAVED_STATE_FILENAME, "w") as f:
             f.write(jsonpickle.encode(self))
 
         self.cloudreactor_api_client = old_client
@@ -687,10 +752,12 @@ The access key and secret key are not sent to CloudReactor.
     def validate_aws_access(self) -> Optional[str]:
         sts = None
         try:
-            sts = self.make_boto_client('sts')
+            sts = self.make_boto_client("sts")
         except Exception:
             logging.warning("Failed to validate AWS credentials", exc_info=True)
-            print("The AWS access key / secret key pair was not valid. Please check them and try again.\n")
+            print(
+                "The AWS access key / secret key pair was not valid. Please check them and try again.\n"
+            )
             return None
 
         if sts is None:
@@ -698,11 +765,15 @@ The access key and secret key are not sent to CloudReactor.
 
         try:
             caller_id = sts.get_caller_identity()
-            self.aws_account_id = caller_id['Account']
-            print(f"Your AWS credentials for AWS account {self.aws_account_id} are valid.\n")
+            self.aws_account_id = caller_id["Account"]
+            print(
+                f"Your AWS credentials for AWS account {self.aws_account_id} are valid.\n"
+            )
         except Exception:
             logging.warning("Failed to get caller identity from AWS", exc_info=True)
-            print("Failed to fetch your AWS user info. Please check your AWS credentials and try again.\n")
+            print(
+                "Failed to fetch your AWS user info. Please check your AWS credentials and try again.\n"
+            )
             self.aws_account_id = None
 
         self.save()
@@ -714,25 +785,33 @@ The access key and secret key are not sent to CloudReactor.
             return None
 
         if self.aws_account_id is None:
-            print("You must set your AWS credentials before selecting an ECS cluster.\n")
+            print(
+                "You must set your AWS credentials before selecting an ECS cluster.\n"
+            )
             return None
 
-        ecs_client = self.make_boto_client('ecs')
+        ecs_client = self.make_boto_client("ecs")
 
         if ecs_client is None:
-            print("Your AWS credentials do not give you access to ECS operations. Please check your AWS credentials.\n")
+            print(
+                "Your AWS credentials do not give you access to ECS operations. Please check your AWS credentials.\n"
+            )
             return None
 
         self.available_cluster_arns = None
         try:
             resp = ecs_client.list_clusters(maxResults=100)
-            self.available_cluster_arns = resp['clusterArns']
+            self.available_cluster_arns = resp["clusterArns"]
             self.save()
-        except ClientError as client_error:
+        except ClientError:
             logging.warning("Can't list clusters", exc_info=True)
 
-        if (self.available_cluster_arns is None) or (len(self.available_cluster_arns) == 0):
-            rv = questionary.confirm(f"No ECS clusters found in region {self.aws_region}. Do you want to create one?").ask()
+        if (self.available_cluster_arns is None) or (
+            len(self.available_cluster_arns) == 0
+        ):
+            rv = questionary.confirm(
+                f"No ECS clusters found in region {self.aws_region}. Do you want to create one?"
+            ).ask()
 
             if rv:
                 return self.create_cluster(ecs_client)
@@ -744,8 +823,8 @@ The access key and secret key are not sent to CloudReactor.
         choices = self.available_cluster_arns + [CREATE_NEW_ECS_CLUSTER_CHOICE]
 
         selection = questionary.select(
-            "Which ECS cluster do you want to use to run your tasks?",
-            choices=choices).ask()
+            "Which ECS cluster do you want to use to run your tasks?", choices=choices
+        ).ask()
 
         if selection == CREATE_NEW_ECS_CLUSTER_CHOICE:
             return self.create_cluster(ecs_client)
@@ -758,7 +837,7 @@ The access key and secret key are not sent to CloudReactor.
 
     def create_cluster(self, ecs_client=None) -> Optional[str]:
         if ecs_client is None:
-            ecs_client = self.make_boto_client('ecs')
+            ecs_client = self.make_boto_client("ecs")
 
         if ecs_client is None:
             print("You must set your AWS credentials before creating an ECS cluster.\n")
@@ -767,7 +846,8 @@ The access key and secret key are not sent to CloudReactor.
         good_cluster_name = False
         while not good_cluster_name:
             cluster_name = questionary.text(
-                'What do you want to name the ECS cluster?').ask()
+                "What do you want to name the ECS cluster?"
+            ).ask()
 
             if cluster_name is None:
                 print("Skipping ECS cluster creation.\n")
@@ -775,7 +855,8 @@ The access key and secret key are not sent to CloudReactor.
 
             if ECS_CLUSTER_NAME_REGEX.fullmatch(cluster_name) is None:
                 print(
-                    f"'{cluster_name}' is not a valid ECS cluster name. cluster names can only contain alphanumeric characters and dashes, no underscores.")
+                    f"'{cluster_name}' is not a valid ECS cluster name. cluster names can only contain alphanumeric characters and dashes, no underscores."
+                )
                 cluster_name = None
             else:
                 good_cluster_name = True
@@ -784,15 +865,17 @@ The access key and secret key are not sent to CloudReactor.
 
         try:
             resp = ecs_client.create_cluster(
-                clusterName=cluster_name,
-                capacityProviders=[
-                    'FARGATE', 'FARGATE_SPOT'
-                ])
+                clusterName=cluster_name, capacityProviders=["FARGATE", "FARGATE_SPOT"]
+            )
 
-            self.cluster_arn = cast(str, resp['cluster']['clusterArn'])
-            self.available_cluster_arns = [self.cluster_arn] + (self.available_cluster_arns or [])
+            self.cluster_arn = cast(str, resp["cluster"]["clusterArn"])
+            self.available_cluster_arns = [self.cluster_arn] + (
+                self.available_cluster_arns or []
+            )
 
-            print(f"Successfully created ECS cluster {self.cluster_arn} in region {self.aws_region}.\n")
+            print(
+                f"Successfully created ECS cluster {self.cluster_arn} in region {self.aws_region}.\n"
+            )
             self.save()
             return self.cluster_arn
         except Exception as ex:
@@ -800,12 +883,16 @@ The access key and secret key are not sent to CloudReactor.
             print(f"Failed to create ECS cluster: {ex}")
             return None
 
-    def start_role_cloudformation_template_upload(self, cf_client=None) -> Optional[str]:
+    def start_role_cloudformation_template_upload(
+        self, cf_client=None
+    ) -> Optional[str]:
         if not cf_client:
-            cf_client = self.make_boto_client('cloudformation')
+            cf_client = self.make_boto_client("cloudformation")
 
         if not cf_client:
-            print("You must set your AWS credentials before installing a CloudFormation stack.\n")
+            print(
+                "You must set your AWS credentials before installing a CloudFormation stack.\n"
+            )
             return None
 
         template_url = self.make_cloudformation_role_template_url()
@@ -823,27 +910,25 @@ The access key and secret key are not sent to CloudReactor.
                     TemplateURL=template_url,
                     Parameters=[
                         {
-                            'ParameterKey': 'DeploymentEnvironment',
-                            'ParameterValue': self.deployment_environment,
-                            'UsePreviousValue': False,
+                            "ParameterKey": "DeploymentEnvironment",
+                            "ParameterValue": self.deployment_environment,
+                            "UsePreviousValue": False,
                         },
                         {
-                            'ParameterKey': 'CloudwatchLogGroupPattern',
-                            'ParameterValue': '*',
-                            'UsePreviousValue': False,
+                            "ParameterKey": "CloudwatchLogGroupPattern",
+                            "ParameterValue": "*",
+                            "UsePreviousValue": False,
                         },
                         {
-                            'ParameterKey': 'ExternalID',
-                            'UsePreviousValue': True,
+                            "ParameterKey": "ExternalID",
+                            "UsePreviousValue": True,
                         },
                         {
-                            'ParameterKey': 'WorkflowStarterAccessKey',
-                            'UsePreviousValue': True,
-                        }
+                            "ParameterKey": "WorkflowStarterAccessKey",
+                            "UsePreviousValue": True,
+                        },
                     ],
-                    Capabilities=[
-                        'CAPABILITY_NAMED_IAM'
-                    ]
+                    Capabilities=["CAPABILITY_NAMED_IAM"],
                 )
             else:
                 self.external_id = self.generate_random_key()
@@ -853,45 +938,49 @@ The access key and secret key are not sent to CloudReactor.
                     TemplateURL=template_url,
                     Parameters=[
                         {
-                            'ParameterKey': 'DeploymentEnvironment',
-                            'ParameterValue': self.deployment_environment,
-                            'UsePreviousValue': False,
+                            "ParameterKey": "DeploymentEnvironment",
+                            "ParameterValue": self.deployment_environment,
+                            "UsePreviousValue": False,
                         },
                         {
-                            'ParameterKey': 'CloudwatchLogGroupPattern',
+                            "ParameterKey": "CloudwatchLogGroupPattern",
                             # TODO: allow user to specify this
-                            'ParameterValue': '*',
-                            'UsePreviousValue': True,
+                            "ParameterValue": "*",
+                            "UsePreviousValue": True,
                         },
                         {
-                            'ParameterKey': 'ExternalID',
-                            'ParameterValue': self.external_id,
-                            'UsePreviousValue': False,
+                            "ParameterKey": "ExternalID",
+                            "ParameterValue": self.external_id,
+                            "UsePreviousValue": False,
                         },
                         {
-                            'ParameterKey': 'WorkflowStarterAccessKey',
-                            'ParameterValue': self.workflow_starter_access_key,
-                            'UsePreviousValue': False,
-                        }
+                            "ParameterKey": "WorkflowStarterAccessKey",
+                            "ParameterValue": self.workflow_starter_access_key,
+                            "UsePreviousValue": False,
+                        },
                     ],
-                    Capabilities=[
-                        'CAPABILITY_NAMED_IAM'
-                    ]
+                    Capabilities=["CAPABILITY_NAMED_IAM"],
                 )
 
-            self.uploaded_stack_id = resp['StackId']
+            self.uploaded_stack_id = resp["StackId"]
         except Exception as ex:
             ex_str = str(ex)
-            if self.stack_id_to_update and (ex_str.find('No updates are to be performed') >= 0):
-                print(f"No stack updates were necessary. Using existing stack name '{self.stack_name}'.\n")
+            if self.stack_id_to_update and (
+                ex_str.find("No updates are to be performed") >= 0
+            ):
+                print(
+                    f"No stack updates were necessary. Using existing stack name '{self.stack_name}'.\n"
+                )
                 self.uploaded_stack_id = self.stack_id_to_update
                 return self.uploaded_stack_id
             else:
                 logging.warning("Failed to install stack", exc_info=True)
                 print(f"Failed to install stack: {ex}\n")
 
-                if ex_str.find('AlreadyExistsException') >= 0:
-                    rv = questionary.confirm('That stack already exists. Delete it?').ask()
+                if ex_str.find("AlreadyExistsException") >= 0:
+                    rv = questionary.confirm(
+                        "That stack already exists. Delete it?"
+                    ).ask()
 
                     if rv:
                         self.delete_role_stack(cf_client)
@@ -901,147 +990,175 @@ The access key and secret key are not sent to CloudReactor.
 
         self.save()
 
-        print(f"Started CloudFormation role template installation for stack '{self.stack_name}', stack ID is {self.uploaded_stack_id}.")
+        print(
+            f"Started CloudFormation role template installation for stack '{self.stack_name}', stack ID is {self.uploaded_stack_id}."
+        )
         return self.uploaded_stack_id
 
     def wait_for_role_stack_upload(self, cf_client=None):
         if not self.uploaded_stack_id:
-            logging.error("wait_for_role_stack_upload() called but, but no stack ID was saved.")
+            logging.error(
+                "wait_for_role_stack_upload() called but, but no stack ID was saved."
+            )
             return False
 
         if not cf_client:
-            cf_client = self.make_boto_client('cloudformation')
+            cf_client = self.make_boto_client("cloudformation")
 
         if not cf_client:
-            print("Your AWS credentials are invalid. Please check them and try again.\n")
+            print(
+                "Your AWS credentials are invalid. Please check them and try again.\n"
+            )
             return None
 
-        stack = self.wait_for_stack_upload(self.uploaded_stack_id,
-            self.stack_name, cf_client)
+        stack = self.wait_for_stack_upload(
+            self.uploaded_stack_id, self.stack_name, cf_client
+        )
 
         if stack is None:
             return None
 
         self.stack_upload_finished_at = datetime.now()
-        self.stack_upload_status = stack['StackStatus']
+        self.stack_upload_status = stack["StackStatus"]
 
         if self.stack_upload_status in CLOUDFORMATION_SUCCESSFUL_STATUSES:
-            outputs = stack['Outputs'] or []
+            outputs = stack["Outputs"] or []
 
             for output in outputs:
-                output_key = output['OutputKey']
-                output_value = output['OutputValue']
-                if output_key == 'CloudreactorRoleARN':
+                output_key = output["OutputKey"]
+                output_value = output["OutputValue"]
+                if output_key == "CloudreactorRoleARN":
                     self.assumable_role_arn = output_value
-                elif output_key == 'TaskExecutionRoleARN':
+                elif output_key == "TaskExecutionRoleARN":
                     self.task_execution_role_arn = output_value
-                elif output_key == 'WorkflowStarterARN':
+                elif output_key == "WorkflowStarterARN":
                     self.workflow_starter_arn = output_value
                 else:
-                    logging.warning(f"Got unknown output '{output_key}' with value '{output_value}'.")
+                    logging.warning(
+                        f"Got unknown output '{output_key}' with value '{output_value}'."
+                    )
 
-            params = stack['Parameters'] or []
+            params = stack["Parameters"] or []
 
             for param in params:
-                param_key = param['ParameterKey']
-                param_value = param['ParameterValue']
+                param_key = param["ParameterKey"]
+                param_value = param["ParameterValue"]
 
-                if param_key == 'ExternalID':
+                if param_key == "ExternalID":
                     self.external_id = param_value
-                elif param_key == 'WorkflowStarterAccessKey':
+                elif param_key == "WorkflowStarterAccessKey":
                     self.workflow_starter_access_key = param_value
 
-            if self.external_id and self.workflow_starter_access_key and \
-                    self.assumable_role_arn and self.task_execution_role_arn and \
-                    self.workflow_starter_arn:
+            if (
+                self.external_id
+                and self.workflow_starter_access_key
+                and self.assumable_role_arn
+                and self.task_execution_role_arn
+                and self.workflow_starter_arn
+            ):
                 self.stack_upload_succeeded = True
                 self.save()
                 return True
 
-            print('Something was missing from the stack output. ' + HELP_MESSAGE + '\n')
+            print("Something was missing from the stack output. " + HELP_MESSAGE + "\n")
             self.stack_upload_succeeded = False
             self.save()
             return None
         else:
-            self.stack_upload_status_reason = stack.get('StackStatusReason')
+            self.stack_upload_status_reason = stack.get("StackStatusReason")
             self.stack_upload_succeeded = False
             self.save()
 
-            print(f"The CloudReactor permissions stack upload failed with status '{self.stack_upload_status}' and status reason '{self.stack_upload_status_reason}'.")
+            print(
+                f"The CloudReactor permissions stack upload failed with status '{self.stack_upload_status}' and status reason '{self.stack_upload_status_reason}'."
+            )
             return None
 
-    def wait_for_vpc_stack_upload(self, vpc_stack_id: str, vpc_stack_name: str,
-            cf_client):
+    def wait_for_vpc_stack_upload(
+        self, vpc_stack_id: str, vpc_stack_name: str, cf_client
+    ):
         if not vpc_stack_id:
-            logging.error("wait_for_vpc_stack_upload() called but, but no vpc_stack_id was specified.")
+            logging.error(
+                "wait_for_vpc_stack_upload() called but, but no vpc_stack_id was specified."
+            )
             return False
 
-        stack = self.wait_for_stack_upload(vpc_stack_id,
-            vpc_stack_name, cf_client)
+        stack = self.wait_for_stack_upload(vpc_stack_id, vpc_stack_name, cf_client)
 
         if stack is None:
             return None
 
-        stack_upload_status = stack['StackStatus']
+        stack_upload_status = stack["StackStatus"]
 
         if stack_upload_status in CLOUDFORMATION_SUCCESSFUL_STATUSES:
-            outputs = stack['Outputs'] or []
+            outputs = stack["Outputs"] or []
             self.subnets = []
             # TODO add security groups
 
             for output in outputs:
-                output_key = output['OutputKey']
-                output_value = output['OutputValue']
-                if output_key == 'VPC':
+                output_key = output["OutputKey"]
+                output_value = output["OutputValue"]
+                if output_key == "VPC":
                     self.vpc_id = output_value
                     logging.debug(f"Got VPC {self.vpc_id} from stack output")
-                elif output_key == 'SubnetsPrivate':
-                    self.subnets = output_value.split(',')
+                elif output_key == "SubnetsPrivate":
+                    self.subnets = output_value.split(",")
                     logging.debug(f"Got subnets {self.subnets} from stack output")
-                elif output_key == 'DefaultTaskSecurityGroup':
-                    logging.debug(f"Got security group {output_value} from stack output")
+                elif output_key == "DefaultTaskSecurityGroup":
+                    logging.debug(
+                        f"Got security group {output_value} from stack output"
+                    )
                     self.security_groups = [output_value]
                 else:
-                    logging.debug(f"Got output '{output_key}' with value '{output_value}'.")
+                    logging.debug(
+                        f"Got output '{output_key}' with value '{output_value}'."
+                    )
 
             if self.vpc_id and self.subnets and self.security_groups:
                 self.was_vpc_created_by_wizard = True
                 self.save()
                 return self.vpc_id
 
-            print('Something was missing from the stack output. ' + HELP_MESSAGE + '\n')
+            print("Something was missing from the stack output. " + HELP_MESSAGE + "\n")
             return None
         else:
-            stack_upload_status_reason = stack['StackStatusReason']
-            print(f"The VPC stack upload failed with status '{stack_upload_status}' and status reason '{stack_upload_status_reason}'.")
+            stack_upload_status_reason = stack["StackStatusReason"]
+            print(
+                f"The VPC stack upload failed with status '{stack_upload_status}' and status reason '{stack_upload_status_reason}'."
+            )
             return None
 
-    def wait_for_stack_upload(self, stack_id: str, stack_name: str,
-            cf_client) -> Optional[dict[str, Any]]:
+    def wait_for_stack_upload(
+        self, stack_id: str, stack_name: str, cf_client
+    ) -> Optional[dict[str, Any]]:
         while True:
             resp = None
             try:
-                resp = cf_client.describe_stacks(
-                    StackName=stack_id
-                )
+                resp = cf_client.describe_stacks(StackName=stack_id)
             except Exception:
-                logging.warning("Can't describe CloudFormation stacks, re-creating client ...",
-                    exc_info=True)
+                logging.warning(
+                    "Can't describe CloudFormation stacks, re-creating client ...",
+                    exc_info=True,
+                )
                 time.sleep(10)
-                cf_client = self.make_boto_client('cloudformation')
+                cf_client = self.make_boto_client("cloudformation")
 
             if resp:
-                stacks = resp['Stacks']
+                stacks = resp["Stacks"]
 
                 if len(stacks) == 0:
-                    print(f"CloudFormation stack '{stack_name}' was deleted, please check your settings and try again.\n")
+                    print(
+                        f"CloudFormation stack '{stack_name}' was deleted, please check your settings and try again.\n"
+                    )
                     return None
 
                 stack = stacks[0]
-                status = stack['StackStatus']
+                status = stack["StackStatus"]
 
                 if status in CLOUDFORMATION_IN_PROGRESS_STATUSES:
-                    print(f"CloudFormation stack installation is still in progress ({status}). Waiting 10 seconds before checking again ...")
+                    print(
+                        f"CloudFormation stack installation is still in progress ({status}). Waiting 10 seconds before checking again ..."
+                    )
                     time.sleep(10)
                 else:
                     return stack
@@ -1052,20 +1169,28 @@ The access key and secret key are not sent to CloudReactor.
             return None
 
         if cf_client is None:
-            cf_client = self.make_boto_client('cloudformation')
+            cf_client = self.make_boto_client("cloudformation")
 
         if cf_client is None:
-            print("AWS authentication is not working, can't delete CloudFormation stack. Please check your credentials.\n")
+            print(
+                "AWS authentication is not working, can't delete CloudFormation stack. Please check your credentials.\n"
+            )
             return None
 
         try:
             cf_client.delete_stack(StackName=stack_id_or_name)
-            print(f"Stack '{stack_id_or_name}' was scheduled for deletion. It may take a few minutes before the stack is completely deleted.\n")
+            print(
+                f"Stack '{stack_id_or_name}' was scheduled for deletion. It may take a few minutes before the stack is completely deleted.\n"
+            )
             return True
         except Exception as ex:
             logging.warning("Can't delete stack", exc_info=True)
-            print(f"Can't delete CloudFormation stack '{stack_id_or_name}', error = {ex}")
-            print("You can use the AWS Console to delete the CloudFormation stack manually. You can still use this wizard to install another CloudFormation stack with a different name.\n")
+            print(
+                f"Can't delete CloudFormation stack '{stack_id_or_name}', error = {ex}"
+            )
+            print(
+                "You can use the AWS Console to delete the CloudFormation stack manually. You can still use this wizard to install another CloudFormation stack with a different name.\n"
+            )
             return None
 
     def delete_role_stack(self, cf_client=None) -> Optional[bool]:
@@ -1082,7 +1207,9 @@ The access key and secret key are not sent to CloudReactor.
 
     def handle_role_stack_upload_finished(self, cf_client=None) -> Optional[bool]:
         if self.stack_upload_succeeded:
-            print('The installation of the CloudFormation stack for CloudReactor permissions was successful.')
+            print(
+                "The installation of the CloudFormation stack for CloudReactor permissions was successful."
+            )
 
             if self.cloudreactor_credentials:
                 if self.create_or_update_run_environment():
@@ -1092,9 +1219,13 @@ The access key and secret key are not sent to CloudReactor.
             else:
                 return True
         else:
-            reason = self.stack_upload_status_reason or '(Unknown)'
-            print(f"The installation of the CloudFormation stack for CloudReactor permissions failed with status '{self.stack_upload_status}' and reason '{reason}'.")
-            rv = questionary.confirm('Do you want to delete the stack and try again?').ask()
+            reason = self.stack_upload_status_reason or "(Unknown)"
+            print(
+                f"The installation of the CloudFormation stack for CloudReactor permissions failed with status '{self.stack_upload_status}' and reason '{reason}'."
+            )
+            rv = questionary.confirm(
+                "Do you want to delete the stack and try again?"
+            ).ask()
             if rv:
                 self.delete_role_stack(cf_client)
 
@@ -1102,7 +1233,8 @@ The access key and secret key are not sent to CloudReactor.
             return False
 
     def ask_for_subnets(self) -> Optional[list[str]]:
-        print("""
+        print(
+            """
 
 ECS Tasks require one or more subnets to run in.
 For more information see https://cloudonaut.io/fargate-networking-101/
@@ -1114,14 +1246,17 @@ access, you should select them below.
 If you don't have existing subnets, this wizard can create them for you now.
 You can also choose to skip this step and enter the subnets after the Run
 Environment has been created.
-        """)
+        """
+        )
 
         if not self.aws_account_id:
-            print("""
+            print(
+                """
 
 You must set your AWS credentials before selecting or creating subnets.
 
-            """)
+            """
+            )
             return None
 
         choices = []
@@ -1129,42 +1264,45 @@ You must set your AWS credentials before selecting or creating subnets.
         subnets_str = self.list_to_string(self.subnets)
 
         if self.subnets is not None:
-            choices = ['Use previously entered subnets: ' + subnets_str]
+            choices = ["Use previously entered subnets: " + subnets_str]
 
         choices += [
-            'Create a new VPC which includes subnets, or use an existing VPC set up by this wizard',
-            'Select existing subnet(s)',
+            "Create a new VPC which includes subnets, or use an existing VPC set up by this wizard",
+            "Select existing subnet(s)",
             # 'Enter subnets manually',
-            'Skip subnets'
+            "Skip subnets",
         ]
 
-        rv = questionary.select('How would you like to specify subnets?',
-                                choices=choices).ask()
+        rv = questionary.select(
+            "How would you like to specify subnets?", choices=choices
+        ).ask()
 
         if rv is None:
             return None
 
-        if rv.startswith('Use previous'):
+        if rv.startswith("Use previous"):
             print(f"Using previously entered subnets {subnets_str}.\n")
             return self.subnets
 
-        if rv.startswith('Skip'):
-            print('Skipping subnets for now. You can add them manually later.\n')
+        if rv.startswith("Skip"):
+            print("Skipping subnets for now. You can add them manually later.\n")
             self.subnets = []
             self.save()
             return self.subnets
 
-        is_create = rv.startswith('Create')
-        is_select = rv.startswith('Select')
+        is_create = rv.startswith("Create")
+        is_select = rv.startswith("Select")
 
         rv = None
         ec2_client = None
         if is_create:
             rv = self.create_vpc()
         elif is_select:
-            ec2_client = self.make_boto_client('ec2')
+            ec2_client = self.make_boto_client("ec2")
             if not ec2_client:
-                print("You need to specify your AWS credentials before selecting subnets.\n")
+                print(
+                    "You need to specify your AWS credentials before selecting subnets.\n"
+                )
                 return None
 
             rv = self.ask_for_vpc(ec2_client)
@@ -1181,7 +1319,8 @@ You must set your AWS credentials before selecting or creating subnets.
         return None
 
     def ask_for_security_groups(self) -> Optional[list[str]]:
-        print("""
+        print(
+            """
 
 ECS Tasks require at least one security group that allows outbound access to the
 public internet. This step allows you to specify the default security groups to
@@ -1193,13 +1332,16 @@ If you don't an existing security group, this wizard can create it for you now.
 You can also choose to skip this step and enter the security groups after the
 Run Environment has been created.
 
-        """)
+        """
+        )
         if not self.aws_account_id:
-            print("""
+            print(
+                """
 
 You must set your AWS credentials before creating or selecting security groups.
 
-            """)
+            """
+            )
             return None
 
         choices = []
@@ -1207,42 +1349,47 @@ You must set your AWS credentials before creating or selecting security groups.
         security_groups_str = self.list_to_string(self.security_groups)
 
         if self.security_groups is not None:
-            choices = ['Use previously entered security groups: ' + security_groups_str]
+            choices = ["Use previously entered security groups: " + security_groups_str]
 
         choices += [
-            'Create a new VPC which includes a default security group',
-            'Select existing security group(s)',
+            "Create a new VPC which includes a default security group",
+            "Select existing security group(s)",
             # 'Enter security groups manually',
-            'Skip security groups'
+            "Skip security groups",
         ]
 
-        rv = questionary.select('How would you like to specify security groups?',
-                                choices=choices).ask()
+        rv = questionary.select(
+            "How would you like to specify security groups?", choices=choices
+        ).ask()
 
         if rv is None:
             return None
 
-        if rv.startswith('Use previous'):
+        if rv.startswith("Use previous"):
             print(f"Using previously entered security groups {security_groups_str}.\n")
             return self.security_groups
 
-        if rv.startswith('Skip'):
-            print('Skipping security groups for now. You can add them manually later.\n')
+        if rv.startswith("Skip"):
+            print(
+                "Skipping security groups for now. You can add them manually later.\n"
+            )
             self.security_groups = []
             self.save()
             return self.security_groups
 
-        is_create = rv.startswith('Create')
-        is_select = rv.startswith('Select')
+        is_create = rv.startswith("Create")
+        is_select = rv.startswith("Select")
 
         rv = None
         ec2_client = None
         if is_create:
             rv = self.create_vpc()
         elif is_select:
-            ec2_client = self.make_boto_client('ec2')
+            ec2_client = self.make_boto_client("ec2")
             if not ec2_client:
-                print("You need to specify your AWS credentials before selecting security groups.\n")
+                print(
+                    "You need to specify your AWS credentials before selecting security groups.\n"
+                )
                 return None
             rv = self.ask_for_vpc(ec2_client)
 
@@ -1259,14 +1406,14 @@ You must set your AWS credentials before creating or selecting security groups.
 
     def ask_for_vpc(self, ec2_client) -> Optional[str]:
         vpc_ids = self.list_vpcs(ec2_client)
-        create_choice = 'Create a new VPC ...'
+        create_choice = "Create a new VPC ..."
 
         if vpc_ids:
             choices = []
 
             current_vpc_choice = None
             if self.vpc_id and (self.vpc_id in vpc_ids):
-                current_vpc_choice = self.vpc_id + ' (current)'
+                current_vpc_choice = self.vpc_id + " (current)"
                 choices.append(current_vpc_choice)
                 vpc_ids.remove(self.vpc_id)
                 choices += vpc_ids
@@ -1275,7 +1422,9 @@ You must set your AWS credentials before creating or selecting security groups.
 
             choices.append(create_choice)
 
-            vpc_id = questionary.select("Which VPC do you want to use?", choices=choices).ask()
+            vpc_id = questionary.select(
+                "Which VPC do you want to use?", choices=choices
+            ).ask()
 
             if vpc_id is None:
                 return None
@@ -1286,7 +1435,7 @@ You must set your AWS credentials before creating or selecting security groups.
                     self.save()
                 return vpc_id
         else:
-            rv = questionary.confirm('Create a new VPC?').ask()
+            rv = questionary.confirm("Create a new VPC?").ask()
 
             if not rv:
                 return None
@@ -1294,63 +1443,74 @@ You must set your AWS credentials before creating or selecting security groups.
         return self.create_vpc()
 
     def create_vpc(self) -> Optional[str]:
-        print("""
+        print(
+            """
 This wizard can create a VPC suitable for running ECS tasks, along with subnets and a security group.
 For more information, see https://docs.aws.amazon.com/vpc/latest/userguide/VPC_Subnets.html
 
 To create the VPC, this wizard installs a CloudFormation template.
 If you created a VPC with this wizard previously, you can select it and
 this wizard will update it.
-""")
+"""
+        )
 
-        ec2_client = self.make_boto_client('ec2')
+        ec2_client = self.make_boto_client("ec2")
 
         if ec2_client is None:
             print("You must set your AWS credentials before creating a VPC.\n")
             return None
 
         az_response = ec2_client.describe_availability_zones(
-                Filters=[
-                    {
-                        'Name': 'region-name',
-                        'Values': [self.aws_region]
-                    }
-                ]
+            Filters=[{"Name": "region-name", "Values": [self.aws_region]}]
         )
 
-        azs = az_response['AvailabilityZones']
+        azs = az_response["AvailabilityZones"]
 
         logging.debug(f"Got availability zones: {azs}")
 
         print(f"Got availability zones: {azs}")
         az_name_to_id = {}
         for az in azs:
-            az_name_to_id[az['ZoneName']] = az['ZoneId']
+            az_name_to_id[az["ZoneName"]] = az["ZoneId"]
 
-        print("""
+        print(
+            """
 Public subnets are accessible from the public internet and can make requests
 to the public internet with a free Internet Gateway (bandwidth charges still
 apply though). Because they are accessible to the public, they may not be
 secure enough for sensitive applications or data. If you plan on deploying
 a web server to public subnets, ensure you create at subnets in at least
 2 Availability Zones, so that you can use an Application Load Balancer.
-""")
+"""
+        )
 
-        choices = [Choice(f"{az['ZoneName']} ({az['ZoneId']})",
-                value=az['ZoneName'], checked=(i < 2)) \
-                for i, az in enumerate(azs)]
+        choices = [
+            Choice(
+                f"{az['ZoneName']} ({az['ZoneId']})",
+                value=az["ZoneName"],
+                checked=(i < 2),
+            )
+            for i, az in enumerate(azs)
+        ]
 
         selected_public_azs = questionary.checkbox(
-                'Which availability zones do you want to create public subnets in?',
-                choices=choices).ask()
+            "Which availability zones do you want to create public subnets in?",
+            choices=choices,
+        ).ask()
 
         print(f"Selected public Availability Zones = {selected_public_azs}")
 
-        choices = [Choice(f"{az['ZoneName']} ({az['ZoneId']})",
-                value=az['ZoneName'], checked=az['ZoneName'] in selected_public_azs) \
-                for i, az in enumerate(azs)]
+        choices = [
+            Choice(
+                f"{az['ZoneName']} ({az['ZoneId']})",
+                value=az["ZoneName"],
+                checked=az["ZoneName"] in selected_public_azs,
+            )
+            for i, az in enumerate(azs)
+        ]
 
-        print("""
+        print(
+            """
 Private subnets are inaccessible from the private internet, so running tasks in
 private subnets may be more secure than running them in a public subnet.
 However, each private subnet requires a relatively expensive NAT gateway
@@ -1366,43 +1526,49 @@ Zones as your public subnets.
 If you plan on deploying a web server to private subnets, ensure you create at
 subnets in at least 2 Availability Zones, so that you can use an
 Application Load Balancer.
-""")
+"""
+        )
 
         selected_private_azs = questionary.checkbox(
-                'Which availability zones do you want to create private subnets in?',
-                choices=choices).ask()
+            "Which availability zones do you want to create private subnets in?",
+            choices=choices,
+        ).ask()
 
         selected_private_azs_with_nat = selected_private_azs
 
         if len(selected_private_azs) == 0:
-            print('No subnets in private Availability Zones will be created.')
+            print("No subnets in private Availability Zones will be created.")
         else:
             print(f"Selected private Availability Zones = {selected_private_azs}")
 
             choices = [
-                Choice(f"{az} ({az_name_to_id[az]})", value=az,
-                        checked=True) \
-                        for az in selected_private_azs \
-                        if az in selected_public_azs
+                Choice(f"{az} ({az_name_to_id[az]})", value=az, checked=True)
+                for az in selected_private_azs
+                if az in selected_public_azs
             ]
 
             if len(choices) == 0:
-                print("""
+                print(
+                    """
 The public and private Availability Zones you selected have no zones in common.
 Therefore, none of your private Availability Zones will have access to the
 public internet. If this is not desired, press Control-C to abort the VPC
 creator.
-                """)
+                """
+                )
 
             else:
                 selected_private_azs_with_nat = questionary.checkbox(
-                        'Which Availability Zones do you want to add NAT Gateways to?',
-                        choices=choices).ask()
+                    "Which Availability Zones do you want to add NAT Gateways to?",
+                    choices=choices,
+                ).ask()
 
         second_octet = 0
         done = False
         while not done:
-            rv = questionary.text('The subnets will be in the range 10.[n].0.0/16. What should n be? [0]').ask()
+            rv = questionary.text(
+                "The subnets will be in the range 10.[n].0.0/16. What should n be? [0]"
+            ).ask()
 
             if rv is None:
                 return None
@@ -1424,28 +1590,31 @@ creator.
             done = True
 
         vpc_template = self.make_vpc_template(
-                public_azs=selected_public_azs,
-                private_azs=selected_private_azs,
-                private_azs_with_nat=selected_private_azs_with_nat,
-                second_octet=second_octet)
+            public_azs=selected_public_azs,
+            private_azs=selected_private_azs,
+            private_azs_with_nat=selected_private_azs_with_nat,
+            second_octet=second_octet,
+        )
 
         logging.debug("vpc_template = ")
         logging.debug(vpc_template)
 
-        default_stack_name = 'ECS-VPC'
+        default_stack_name = "ECS-VPC"
         if self.deployment_environment:
-            default_stack_name += ' ' + self.deployment_environment
-            default_stack_name = re.sub("[^A-Za-z0-9\\-]+", '-',
-                    default_stack_name)[:128]
+            default_stack_name += " " + self.deployment_environment
+            default_stack_name = re.sub("[^A-Za-z0-9\\-]+", "-", default_stack_name)[
+                :128
+            ]
 
-        cf_client = self.make_boto_client('cloudformation')
+        cf_client = self.make_boto_client("cloudformation")
 
         rv = self.ask_for_stack_name(
-                default_stack_name=default_stack_name,
-                old_uploaded_stack_name=None,
-                create_or_update_message=None,
-                purpose=' to create a VPC',
-                cf_client=cf_client)
+            default_stack_name=default_stack_name,
+            old_uploaded_stack_name=None,
+            create_or_update_message=None,
+            purpose=" to create a VPC",
+            cf_client=cf_client,
+        )
 
         if rv is None:
             print("Skipping VPC creation for now.\n")
@@ -1456,13 +1625,16 @@ creator.
         vpc_stack_id = vpc_stack_id_to_update
         if not reuse_stack:
             if vpc_stack_id:
-                rv = questionary.confirm(f"Are you sure you want to update the stack '{vpc_stack_name}' with VPC resources?").ask()
+                rv = questionary.confirm(
+                    f"Are you sure you want to update the stack '{vpc_stack_name}' with VPC resources?"
+                ).ask()
                 if not rv:
-                    print('Not updating the stack with VPC. Returning to the menu.')
+                    print("Not updating the stack with VPC. Returning to the menu.")
                     return None
 
-            rv = self.start_vpc_cloudformation_template_upload(vpc_stack_name,
-                vpc_stack_id_to_update, vpc_template, cf_client)
+            rv = self.start_vpc_cloudformation_template_upload(
+                vpc_stack_name, vpc_stack_id_to_update, vpc_template, cf_client
+            )
 
             if rv is None:
                 print("Can't create or update VPC CloudFormation stack.\n")
@@ -1471,11 +1643,14 @@ creator.
             vpc_stack_id = rv
 
         if vpc_stack_id:
-            vpc_id = self.wait_for_vpc_stack_upload(vpc_stack_id,
-                vpc_stack_name, cf_client)
+            vpc_id = self.wait_for_vpc_stack_upload(
+                vpc_stack_id, vpc_stack_name, cf_client
+            )
 
             if vpc_id is None:
-                print(f"Something was wrong with the VPC CloudFormation stack. {HELP_MESSAGE}\n")
+                print(
+                    f"Something was wrong with the VPC CloudFormation stack. {HELP_MESSAGE}\n"
+                )
                 return None
 
             self.vpc_id = vpc_id
@@ -1484,45 +1659,50 @@ creator.
 
         return self.vpc_id
 
-    def make_vpc_template(self, public_azs: list[str],
-            private_azs: list[str],
-            private_azs_with_nat: list[str],
-            second_octet: int) -> str:
+    def make_vpc_template(
+        self,
+        public_azs: list[str],
+        private_azs: list[str],
+        private_azs_with_nat: list[str],
+        second_octet: int,
+    ) -> str:
 
         public_az_letters = [az[-1].upper() for az in public_azs]
         private_az_letters = [az[-1].upper() for az in private_azs]
-        private_az_with_nat_letters = [az[-1].upper() \
-                for az in private_azs_with_nat]
+        private_az_with_nat_letters = [az[-1].upper() for az in private_azs_with_nat]
 
-        all_az_letters = list(dict.fromkeys(public_az_letters \
-                + private_az_letters))
+        all_az_letters = list(dict.fromkeys(public_az_letters + private_az_letters))
 
         all_az_letters.sort()
 
-        env = Environment(
-            loader=FileSystemLoader('./templates/')
-        )
+        env = Environment(loader=FileSystemLoader("./templates/"))
 
-        template = env.get_template('vpc.yml.j2')
+        template = env.get_template("vpc.yml.j2")
 
         data = {
-            'all_az_letters': all_az_letters,
-            'public_az_letters': public_az_letters,
-            'private_az_letters': private_az_letters,
-            'private_az_with_nat_letters': private_az_with_nat_letters,
-            'second_octet': second_octet,
+            "all_az_letters": all_az_letters,
+            "public_az_letters": public_az_letters,
+            "private_az_letters": private_az_letters,
+            "private_az_with_nat_letters": private_az_with_nat_letters,
+            "second_octet": second_octet,
         }
 
         return template.render(data)
 
-    def start_vpc_cloudformation_template_upload(self, vpc_stack_name: str,
-                vpc_stack_id_to_update: str, vpc_template: str,
-                cf_client=None) -> Optional[str]:
+    def start_vpc_cloudformation_template_upload(
+        self,
+        vpc_stack_name: str,
+        vpc_stack_id_to_update: str,
+        vpc_template: str,
+        cf_client=None,
+    ) -> Optional[str]:
         if not cf_client:
-            cf_client = self.make_boto_client('cloudformation')
+            cf_client = self.make_boto_client("cloudformation")
 
         if not cf_client:
-            print("Your AWS credentials are invalid. Please check them and try again.\n")
+            print(
+                "Your AWS credentials are invalid. Please check them and try again.\n"
+            )
             return None
 
         try:
@@ -1530,33 +1710,37 @@ creator.
 
             if vpc_stack_id_to_update:
                 resp = cf_client.update_stack(
-                    StackName=vpc_stack_id_to_update,
-                    TemplateBody=vpc_template
+                    StackName=vpc_stack_id_to_update, TemplateBody=vpc_template
                 )
             else:
                 resp = cf_client.create_stack(
-                    StackName=vpc_stack_name,
-                    TemplateBody=vpc_template
+                    StackName=vpc_stack_name, TemplateBody=vpc_template
                 )
 
-            logging.debug('Got stack response:')
+            logging.debug("Got stack response:")
             logging.debug(resp)
 
-            vpc_stack_id = resp['StackId']
-            print(f"Started CloudFormation VPC template installation for VPC stack '{vpc_stack_name}', stack ID is {vpc_stack_id}.")
+            vpc_stack_id = resp["StackId"]
+            print(
+                f"Started CloudFormation VPC template installation for VPC stack '{vpc_stack_name}', stack ID is {vpc_stack_id}."
+            )
             return vpc_stack_id
         except Exception as ex:
             ex_str = str(ex)
 
-            if vpc_stack_id_to_update and (ex_str.find('No updates are to be performed') >= 0):
-                print(f"No stack updates were necessary. Using existing stack name '{vpc_stack_name}'.\n")
+            if vpc_stack_id_to_update and (
+                ex_str.find("No updates are to be performed") >= 0
+            ):
+                print(
+                    f"No stack updates were necessary. Using existing stack name '{vpc_stack_name}'.\n"
+                )
                 return vpc_stack_id_to_update
 
             logging.warning("Failed to install stack", exc_info=True)
             print(f"Failed to install stack: {ex}")
 
-            if ex_str.find('AlreadyExistsException'):
-                rv = questionary.confirm('That stack already exists. Delete it?').ask()
+            if ex_str.find("AlreadyExistsException"):
+                rv = questionary.confirm("That stack already exists. Delete it?").ask()
                 if rv:
                     self.delete_stack(vpc_stack_name, cf_client)
 
@@ -1572,34 +1756,38 @@ creator.
             # TODO
             return None
         else:
-            print("""
+            print(
+                """
 You can select one or more subnets to use to run ECS tasks.
 Normally these subnets should be private, unless you need to allow inbound access from the public internet like a web server.
-""")
+"""
+            )
 
             selected_subnets: list[str] = []
-            done_choice = 'Done selecting subnets'
+            done_choice = "Done selecting subnets"
 
             choices = [done_choice]
 
             for subnet in available_subnets:
-                arn = subnet['SubnetArn']
-                subnet_id = arn[(arn.rfind('/') + 1):]
+                arn = subnet["SubnetArn"]
+                subnet_id = arn[(arn.rfind("/") + 1) :]
                 subnet_name = None
-                tags = subnet.get('Tags') or []
+                tags = subnet.get("Tags") or []
                 for tag in tags:
-                    if tag['Key'] == 'Name':
-                        subnet_name = tag['Value']
+                    if tag["Key"] == "Name":
+                        subnet_name = tag["Value"]
                 choice_parts = [subnet_id]
 
                 if subnet_name:
                     choice_parts.append(subnet_name)
 
-                choice_parts += [subnet['CidrBlock'], subnet['AvailabilityZone']]
-                choices.append(' | '.join(choice_parts))
+                choice_parts += [subnet["CidrBlock"], subnet["AvailabilityZone"]]
+                choices.append(" | ".join(choice_parts))
 
             while True:
-                rv = questionary.select('Choose a subnet to add:', choices=choices).ask()
+                rv = questionary.select(
+                    "Choose a subnet to add:", choices=choices
+                ).ask()
                 if rv is None:
                     print("Skipping subnets for now.")
                     return None
@@ -1608,7 +1796,7 @@ Normally these subnets should be private, unless you need to allow inbound acces
                     self.subnets = []
 
                     for subnet_choice in selected_subnets:
-                        space_index = subnet_choice.find(' ')
+                        space_index = subnet_choice.find(" ")
                         self.subnets.append(subnet_choice[0:space_index])
 
                     print(f"Using subnets {self.list_to_string(self.subnets)}")
@@ -1617,7 +1805,9 @@ Normally these subnets should be private, unless you need to allow inbound acces
 
                 selected_subnets.append(rv)
                 choices.remove(rv)
-                print(f"Selected subnets so far: {self.list_to_string(selected_subnets)}")
+                print(
+                    f"Selected subnets so far: {self.list_to_string(selected_subnets)}"
+                )
 
     def ask_for_security_groups_in_vpc(self, ec2_client) -> Optional[list[str]]:
         available_security_groups = self.list_security_groups(ec2_client)
@@ -1629,35 +1819,48 @@ Normally these subnets should be private, unless you need to allow inbound acces
             # TODO
             return None
         else:
-            print("""
+            print(
+                """
 You can select one or more security groups here. However, most likely you only need a single one,
 which allows outbound access to the public internet.
-""")
+"""
+            )
             selected_security_groups: list[str] = []
-            done_choice = 'Done selecting security groups'
-            choices = [done_choice] + [f"{sg['GroupId']} ({sg['GroupName']})" for sg in available_security_groups]
+            done_choice = "Done selecting security groups"
+            choices = [done_choice] + [
+                f"{sg['GroupId']} ({sg['GroupName']})"
+                for sg in available_security_groups
+            ]
 
             while True:
-                rv = questionary.select('Choose a security group to add:', choices=choices).ask()
+                rv = questionary.select(
+                    "Choose a security group to add:", choices=choices
+                ).ask()
                 if rv is None:
                     print("Skipping security groups for now.")
                     return None
 
                 if rv == done_choice:
                     self.security_groups = selected_security_groups
-                    print(f"Using security groups {self.list_to_string(self.security_groups)}")
+                    print(
+                        f"Using security groups {self.list_to_string(self.security_groups)}"
+                    )
                     self.save()
                     return self.security_groups
 
-                space_index = rv.find(' ')
+                space_index = rv.find(" ")
                 security_group_id = rv[0:space_index]
 
                 selected_security_groups.append(security_group_id)
                 choices.remove(rv)
-                print(f"Selected security_groups so far: {self.list_to_string(selected_security_groups)}")
+                print(
+                    f"Selected security_groups so far: {self.list_to_string(selected_security_groups)}"
+                )
 
     def ask_for_cloudreactor_credentials(self) -> Optional[Tuple[str, str]]:
-        print('To enable monitoring and management for your Tasks and Workflows, create an CloudReactor account.')
+        print(
+            "To enable monitoring and management for your Tasks and Workflows, create an CloudReactor account."
+        )
 
         old_username: Optional[str] = None
         old_password: Optional[str] = None
@@ -1665,7 +1868,7 @@ which allows outbound access to the public internet.
             old_username = self.cloudreactor_credentials[0]
             old_password = self.cloudreactor_credentials[1]
 
-        q = 'What is your CloudReactor username?'
+        q = "What is your CloudReactor username?"
 
         if old_username:
             q += f" [{old_username}]"
@@ -1682,7 +1885,7 @@ which allows outbound access to the public internet.
                 print("Skipping CloudReactor credentials for now.")
                 return None
 
-        q = 'What is your CloudReactor password?'
+        q = "What is your CloudReactor password?"
 
         if old_password:
             q += " [saved password]"
@@ -1699,8 +1902,9 @@ which allows outbound access to the public internet.
                 print("Skipping CloudReactor credentials for now.")
                 return None
 
-        cloudreactor_api_client = CloudReactorApiClient(username=username,
-                password=password)
+        cloudreactor_api_client = CloudReactorApiClient(
+            username=username, password=password
+        )
 
         print()
 
@@ -1709,9 +1913,9 @@ which allows outbound access to the public internet.
             self.cloudreactor_credentials = (username, password)
             self.cloudreactor_api_client = cloudreactor_api_client
 
-            print('Your CloudReactor credentials are valid.')
-        except:
-            logging.exception('Failed to list groups')
+            print("Your CloudReactor credentials are valid.")
+        except Exception:
+            logging.exception("Failed to list groups")
             self.cloudreactor_api_client = None
             self.cloudreactor_credentials = None
             self.cloudreactor_group = None
@@ -1723,45 +1927,49 @@ which allows outbound access to the public internet.
         cr_api_client = self.get_or_create_cloudreactor_api_client()
 
         if not cr_api_client:
-            print('CloudReactor credentials were not set, please set them.')
+            print("CloudReactor credentials were not set, please set them.")
             return None
 
-        existing_groups = cr_api_client.list_groups()['results']
+        existing_groups = cr_api_client.list_groups()["results"]
 
-        create_new_choice = 'Create a new Group ...'
+        create_new_choice = "Create a new Group ..."
         group_id: Optional[int] = None
         group_name: Optional[str] = None
 
         if existing_groups:
-            choices = [group['name'] for group in existing_groups]
+            choices = [group["name"] for group in existing_groups]
             choices.append(create_new_choice)
 
-            group_name = questionary.select("Which Group do you want to put your Run Environment in?", choices=choices).ask()
+            group_name = questionary.select(
+                "Which Group do you want to put your Run Environment in?",
+                choices=choices,
+            ).ask()
             if group_name is None:
                 return None
 
             if group_name != create_new_choice:
-                group_id = [group['id'] for group
-                    in existing_groups if group['name'] == group_name][0]
+                group_id = [
+                    group["id"]
+                    for group in existing_groups
+                    if group["name"] == group_name
+                ][0]
 
         if group_id:
             self.cloudreactor_group = (group_id, cast(str, group_name))
             self.save()
             return self.cloudreactor_group
 
-        q = 'What do you want to name your Group? '
+        q = "What do you want to name your Group? "
 
         group_name = questionary.text(q).ask()
 
         if group_name is None:
             return None
 
-        data = {
-            'name': group_name
-        }
+        data = {"name": group_name}
         try:
             saved_group = cr_api_client.create_group(data=data)
-            self.cloudreactor_group = (saved_group['id'], saved_group['name'])
+            self.cloudreactor_group = (saved_group["id"], saved_group["name"])
             self.save()
             return self.cloudreactor_group
         except Exception as ex:
@@ -1773,8 +1981,10 @@ which allows outbound access to the public internet.
             if self.cloudreactor_api_client:
                 return self.cloudreactor_api_client
             else:
-                return CloudReactorApiClient(username=self.cloudreactor_credentials[0],
-                        password=self.cloudreactor_credentials[1])
+                return CloudReactorApiClient(
+                    username=self.cloudreactor_credentials[0],
+                    password=self.cloudreactor_credentials[1],
+                )
 
         return None
 
@@ -1784,27 +1994,31 @@ which allows outbound access to the public internet.
 
         if self.cluster_arn:
             name = self.cluster_arn
-            slash_index = name.rfind('/')
+            slash_index = name.rfind("/")
             if slash_index >= 0:
-                name = name[(slash_index + 1):]
-            return re.sub(r'[^A-Za-z-]+', '', name)
+                name = name[(slash_index + 1) :]
+            return re.sub(r"[^A-Za-z-]+", "", name)
 
         return DEFAULT_RUN_ENVIRONMENT_NAME
 
     def create_or_update_run_environment(self) -> Optional[bool]:
-        print("The CloudReactor permissions CloudFormation stack has been uploaded successfully.")
-        print("The final step is to create or update a Run Environment in CloudReactor with the corresponding settings.")
+        print(
+            "The CloudReactor permissions CloudFormation stack has been uploaded successfully."
+        )
+        print(
+            "The final step is to create or update a Run Environment in CloudReactor with the corresponding settings."
+        )
 
         cr_api_client = self.get_or_create_cloudreactor_api_client()
 
         if not cr_api_client:
-            print('CloudReactor credentials were not set, please set them.')
+            print("CloudReactor credentials were not set, please set them.")
             return None
 
         if self.cloudreactor_group is None:
-            #group = self.ask_for_cloudreactor_group()
+            # group = self.ask_for_cloudreactor_group()
 
-            groups = cr_api_client.list_groups()['results']
+            groups = cr_api_client.list_groups()["results"]
 
             if len(groups) == 0:
                 print("No Groups found, please create one on the CloudReactor website.")
@@ -1816,18 +2030,21 @@ which allows outbound access to the public internet.
                 if not t:
                     return None
             else:
-                self.cloudreactor_group = (groups[0]['id'], groups[0]['name'])
+                self.cloudreactor_group = (groups[0]["id"], groups[0]["name"])
 
         cloudreactor_group = cast(Tuple[int, str], self.cloudreactor_group)
         existing_run_environments = cr_api_client.list_run_environments(
-                group_id=cloudreactor_group[0])['results']
+            group_id=cloudreactor_group[0]
+        )["results"]
 
         default_run_environment_name = self.make_default_run_environment_name()
-        create_new_choice = 'Create a new Run Environment'
+        create_new_choice = "Create a new Run Environment"
         run_environment_uuid: Optional[str] = None
         run_environment_name: Optional[str] = None
         if existing_run_environments:
-            choices = [run_environment['name'] for run_environment in existing_run_environments]
+            choices = [
+                run_environment["name"] for run_environment in existing_run_environments
+            ]
             choices.append(create_new_choice)
 
             # Move default to the top
@@ -1835,16 +2052,21 @@ which allows outbound access to the public internet.
                 choices.remove(default_run_environment_name)
                 choices.insert(0, default_run_environment_name)
 
-            run_environment_name = questionary.select("Which Run Environment do you want to update?", choices=choices).ask()
+            run_environment_name = questionary.select(
+                "Which Run Environment do you want to update?", choices=choices
+            ).ask()
             if run_environment_name is None:
                 return None
 
             if run_environment_name != create_new_choice:
-                run_environment_uuid = [run_environment['uuid'] for run_environment
-                    in existing_run_environments if run_environment['name'] == run_environment_name][0]
+                run_environment_uuid = [
+                    run_environment["uuid"]
+                    for run_environment in existing_run_environments
+                    if run_environment["name"] == run_environment_name
+                ][0]
 
         if not run_environment_uuid:
-            q = 'What do you want to name your Run Environment? '
+            q = "What do you want to name your Run Environment? "
 
             if default_run_environment_name:
                 q += f"[{default_run_environment_name}]"
@@ -1861,56 +2083,59 @@ which allows outbound access to the public internet.
                     return None
 
         ecs_caps = {
-            'type': 'AWS ECS',
-            'default_launch_type': 'FARGATE',
-            'supported_launch_types': ['FARGATE'],
-            'default_cluster_arn': self.cluster_arn,
-            'default_execution_role': self.task_execution_role_arn,
+            "type": "AWS ECS",
+            "default_launch_type": "FARGATE",
+            "supported_launch_types": ["FARGATE"],
+            "default_cluster_arn": self.cluster_arn,
+            "default_execution_role": self.task_execution_role_arn,
         }
 
         if self.subnets:
-            ecs_caps['default_subnets'] = self.subnets
+            ecs_caps["default_subnets"] = self.subnets
 
         if self.security_groups:
-            ecs_caps['default_security_groups'] = self.security_groups
+            ecs_caps["default_security_groups"] = self.security_groups
 
         data: dict[str, Any] = {
-            'name': run_environment_name,
-            'aws_account_id': self.aws_account_id,
-            'aws_default_region': self.aws_region,
-            'aws_assumed_role_external_id': self.external_id,
-            'aws_workflow_starter_access_key': self.workflow_starter_access_key,
-            'aws_events_role_arn': self.assumable_role_arn,
-            'aws_workflow_starter_lambda_arn': self.workflow_starter_arn,
-            'execution_method_capabilities': [ecs_caps]
+            "name": run_environment_name,
+            "aws_account_id": self.aws_account_id,
+            "aws_default_region": self.aws_region,
+            "aws_assumed_role_external_id": self.external_id,
+            "aws_workflow_starter_access_key": self.workflow_starter_access_key,
+            "aws_events_role_arn": self.assumable_role_arn,
+            "aws_workflow_starter_lambda_arn": self.workflow_starter_arn,
+            "execution_method_capabilities": [ecs_caps],
         }
 
         if run_environment_uuid is None:
-            data['created_by_group'] = {
-                'id': cloudreactor_group[0]
-            }
+            data["created_by_group"] = {"id": cloudreactor_group[0]}
 
         saved_run_environment: Optional[dict[str, Any]] = None
-        action = 'creating'
+        action = "creating"
         try:
             if run_environment_uuid:
-                action = 'updating'
+                action = "updating"
                 print(f"Updating Run Environment '{run_environment_name}' ...\n")
 
                 saved_run_environment = cr_api_client.update_run_environment(
-                    uuid=run_environment_uuid, data=data)
+                    uuid=run_environment_uuid, data=data
+                )
             else:
                 print(f"Creating Run Environment '{run_environment_name}'.\n")
                 saved_run_environment = cr_api_client.create_run_environment(data=data)
 
-            self.saved_run_environment_uuid = saved_run_environment.get('uuid')
+            self.saved_run_environment_uuid = saved_run_environment.get("uuid")
 
             if not self.saved_run_environment_uuid:
-                print('The Run Environment creation/update response was invalid. ' + HELP_MESSAGE + "\n")
+                print(
+                    "The Run Environment creation/update response was invalid. "
+                    + HELP_MESSAGE
+                    + "\n"
+                )
                 self.saved_run_environment_uuid = None
                 return False
 
-            self.saved_run_environment_name = saved_run_environment['name']
+            self.saved_run_environment_name = saved_run_environment["name"]
             self.save()
             return True
         except Exception as ex:
@@ -1918,15 +2143,23 @@ which allows outbound access to the public internet.
             return False
 
     def handle_run_environment_saved(self):
-        action = 'updated' if self.saved_run_environment_uuid else 'created'
-        print(f"The Run Environment '{self.saved_run_environment_name}' was {action} successfully.\n")
-        print("Congratulations, you've completed all the steps to setup your AWS environment!\n")
-        print("You can view your new Run Environment at " + self.make_run_environment_url())
+        action = "updated" if self.saved_run_environment_uuid else "created"
+        print(
+            f"The Run Environment '{self.saved_run_environment_name}' was {action} successfully.\n"
+        )
+        print(
+            "Congratulations, you've completed all the steps to setup your AWS environment!\n"
+        )
+        print(
+            "You can view your new Run Environment at "
+            + self.make_run_environment_url()
+        )
 
         if not self.subnets or not self.security_groups:
             print("You may optionally add default subnets and security groups there.")
 
-        print(f"""
+        print(
+            f"""
 You can set secrets in Secrets Manager with the name prefix:
 
 CloudReactor/{self.deployment_environment}/common/
@@ -1938,23 +2171,25 @@ you should install your CloudReactor API key with a name of:
 
 CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
 
-        """)
+        """
+        )
 
         print()
 
         choices = [
-            '1. Create or update another Run Environment',
-            '2. Reset all settings and start over',
-            '3. Quit'
+            "1. Create or update another Run Environment",
+            "2. Reset all settings and start over",
+            "3. Quit",
         ]
 
-        selected = questionary.select('What would you like to do next?',
-                choices=choices).ask()
+        selected = questionary.select(
+            "What would you like to do next?", choices=choices
+        ).ask()
 
         if selected is None:
             return None
 
-        dot_index = selected.find('.')
+        dot_index = selected.find(".")
         number = int(selected[:dot_index])
 
         if number == 1:
@@ -1977,7 +2212,9 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
             self.print_menu()
             return True
         else:
-            print("To deploy a Task managed and monitored by CloudReactor, please follow the instructions at https://docs.cloudreactor.io/\n")
+            print(
+                "To deploy a Task managed and monitored by CloudReactor, please follow the instructions at https://docs.cloudreactor.io/\n"
+            )
             print("We hope you enjoy using CloudReactor!")
             print()
             exit(0)
@@ -1986,42 +2223,57 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
         if self.saved_run_environment_uuid is None:
             return None
 
-        host_qualifier = ''
-        if self.cloudreactor_deployment_environment != 'production':
-            host_qualifier = '.' + self.cloudreactor_deployment_environment
+        host_qualifier = ""
+        if self.cloudreactor_deployment_environment != "production":
+            host_qualifier = "." + self.cloudreactor_deployment_environment
 
-        return f"https://dash{host_qualifier}.cloudreactor.io/run_environments/" + \
-            urllib.parse.quote(self.saved_run_environment_uuid)
+        return (
+            f"https://dash{host_qualifier}.cloudreactor.io/run_environments/"
+            + urllib.parse.quote(self.saved_run_environment_uuid)
+        )
 
     def make_cloudformation_role_template_url(self) -> str:
-        host_qualifier = ''
-        file_qualifier = ''
-        if self.cloudreactor_deployment_environment != 'production':
-            host_qualifier = '-' + self.cloudreactor_deployment_environment
-            file_qualifier = '.' + self.cloudreactor_deployment_environment
+        host_qualifier = ""
+        file_qualifier = ""
+        if self.cloudreactor_deployment_environment != "production":
+            host_qualifier = "-" + self.cloudreactor_deployment_environment
+            file_qualifier = "." + self.cloudreactor_deployment_environment
 
-        return 'https://cloudreactor-customer-setup' + host_qualifier \
-                + '.s3-us-west-2.amazonaws.com/cloudreactor-aws-role-template-' \
-                + str(self.role_template_major_version) + file_qualifier + '.json'
+        return (
+            "https://cloudreactor-customer-setup"
+            + host_qualifier
+            + ".s3-us-west-2.amazonaws.com/cloudreactor-aws-role-template-"
+            + str(self.role_template_major_version)
+            + file_qualifier
+            + ".json"
+        )
 
     def make_boto_client(self, service_name: str):
-        if self.aws_access_key and (self.aws_access_key != NO_ACCESS_KEY) \
-                and self.aws_secret_key \
-                and (self.aws_secret_key != NO_ACCESS_KEY):
-            return boto3.client(service_name=service_name,
-                    region_name=self.aws_region,
-                    aws_access_key_id=self.aws_access_key,
-                    aws_secret_access_key=self.aws_secret_key)
+        if (
+            self.aws_access_key
+            and (self.aws_access_key != NO_ACCESS_KEY)
+            and self.aws_secret_key
+            and (self.aws_secret_key != NO_ACCESS_KEY)
+        ):
+            return boto3.client(
+                service_name=service_name,
+                region_name=self.aws_region,
+                aws_access_key_id=self.aws_access_key,
+                aws_secret_access_key=self.aws_secret_key,
+            )
 
         try:
-            return boto3.client(service_name=service_name,
-                    region_name=self.aws_region)
-        except:
+            return boto3.client(service_name=service_name, region_name=self.aws_region)
+        except Exception:
             return None
 
     def generate_random_key(self) -> str:
-        return ''.join(random.SystemRandom().choice(string.ascii_uppercase \
-                + string.ascii_lowercase + string.digits) for _ in range(KEY_LENGTH))
+        return "".join(
+            random.SystemRandom().choice(
+                string.ascii_uppercase + string.ascii_lowercase + string.digits
+            )
+            for _ in range(KEY_LENGTH)
+        )
 
     def list_to_string(self, arr) -> str:
         if arr is None:
@@ -2030,16 +2282,20 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
         if len(arr) == 0:
             return EMPTY_LIST_STRING
 
-        return '(' + ', '.join(arr) + ')'
+        return "(" + ", ".join(arr) + ")"
 
     def list_stacks(self, cf_client=None):
-        print(f"Looking for existing CloudFormation stacks in region {self.aws_region} ...")
+        print(
+            f"Looking for existing CloudFormation stacks in region {self.aws_region} ..."
+        )
 
         if not cf_client:
-            cf_client = self.make_boto_client('cloudformation')
+            cf_client = self.make_boto_client("cloudformation")
 
         if not cf_client:
-            print('We could not determine your existing CloudFormation stacks. Please check your AWS credentials.')
+            print(
+                "We could not determine your existing CloudFormation stacks. Please check your AWS credentials."
+            )
             return None
 
         resp = None
@@ -2047,26 +2303,33 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
             resp = cf_client.list_stacks()
         except Exception as ex:
             logging.warning(f"Failed to list stacks: {ex}")
-            print('We could not determine your existing CloudFormation stacks. Please check your AWS credentials and permissions.')
+            print(
+                "We could not determine your existing CloudFormation stacks. Please check your AWS credentials and permissions."
+            )
             return None
 
         existing_stacks = []
-        stack_summaries = resp.get('StackSummaries') or []
+        stack_summaries = resp.get("StackSummaries") or []
 
         for summary in stack_summaries:
-            stack_id = summary.get('StackId')
-            name = summary.get('StackName')
-            status = summary.get('StackStatus')
+            stack_id = summary.get("StackId")
+            name = summary.get("StackName")
+            status = summary.get("StackStatus")
 
-            if stack_id and name and status and \
-                    (status != 'DELETE_COMPLETE') and (status != 'DELETE_FAILED'):
-                existing_stacks.append({
-                    'stack_id': stack_id,
-                    'name': name,
-                    'status': status
-                })
+            if (
+                stack_id
+                and name
+                and status
+                and (status != "DELETE_COMPLETE")
+                and (status != "DELETE_FAILED")
+            ):
+                existing_stacks.append(
+                    {"stack_id": stack_id, "name": name, "status": status}
+                )
 
-        print(f"Found {len(existing_stacks)} existing CloudFormation stack(s) in region {self.aws_region}:")
+        print(
+            f"Found {len(existing_stacks)} existing CloudFormation stack(s) in region {self.aws_region}:"
+        )
 
         for stack in existing_stacks:
             print(f"{stack['name']}: {stack['status']}")
@@ -2081,12 +2344,14 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
             resp = ec2_client.describe_vpcs(MaxResults=100)
         except Exception as ex:
             logging.warning(f"Failed to list VPCs: {ex}")
-            print('We could not determine your existing VPCs. Please check your AWS credentials and permissions.')
+            print(
+                "We could not determine your existing VPCs. Please check your AWS credentials and permissions."
+            )
             return None
 
-        vpcs = resp['Vpcs']
+        vpcs = resp["Vpcs"]
         print(f"Found {len(vpcs)} VPC(s) in region {self.aws_region}.")
-        return [vpc['VpcId'] for vpc in vpcs]
+        return [vpc["VpcId"] for vpc in vpcs]
 
     def list_subnets(self, ec2_client) -> Optional[list[Any]]:
         if not self.vpc_id:
@@ -2100,21 +2365,24 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
             resp = ec2_client.describe_subnets(
                 Filters=[
                     {
-                        'Name': 'vpc-id',
-                        'Values': [
+                        "Name": "vpc-id",
+                        "Values": [
                             self.vpc_id,
-                        ]
+                        ],
                     },
                 ],
-                MaxResults=100)
+                MaxResults=100,
+            )
         except Exception as ex:
             logging.warning(f"Failed to list subnets: {ex}")
-            print('We could not determine your existing subnets. Please check your AWS credentials and permissions.')
+            print(
+                "We could not determine your existing subnets. Please check your AWS credentials and permissions."
+            )
             return None
 
         logging.debug(f"subnets response = {resp}")
 
-        subnets = resp['Subnets']
+        subnets = resp["Subnets"]
         subnet_count = len(subnets)
         print(f"Found {subnet_count} subnet(s) in VPC {self.vpc_id}.")
 
@@ -2135,60 +2403,72 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
             resp = ec2_client.describe_security_groups(
                 Filters=[
                     {
-                        'Name': 'vpc-id',
-                        'Values': [
+                        "Name": "vpc-id",
+                        "Values": [
                             self.vpc_id,
-                        ]
+                        ],
                     },
                 ],
-                MaxResults=100)
+                MaxResults=100,
+            )
         except Exception as ex:
             logging.warning(f"Failed to list security groups: {ex}")
-            print('We could not determine your existing security groups. Please check your AWS credentials and permissions.')
+            print(
+                "We could not determine your existing security groups. Please check your AWS credentials and permissions."
+            )
             return None
 
-        security_groups = resp['SecurityGroups']
+        security_groups = resp["SecurityGroups"]
         security_group_count = len(security_groups)
         print(f"Found {security_group_count} security group(s) in VPC {self.vpc_id}.")
 
         if security_group_count == 100:
-            print("Warning: more than 100 security groups found, only listing the first 100.")
+            print(
+                "Warning: more than 100 security groups found, only listing the first 100."
+            )
 
         # Return the raw response data
         return security_groups
 
     def obfuscate_string(self, v: str) -> str:
         if not v:
-            return ''
-        return v[0] + ('*' * max(len(v) - 2, 0)) + v[-1]
+            return ""
+        return v[0] + ("*" * max(len(v) - 2, 0)) + v[-1]
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--environment',
-                        help='CloudReactor deployment environment')
-    parser.add_argument('--log-level',
-                        help=f"Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL). Defaults to {DEFAULT_LOG_LEVEL}.")
+    parser.add_argument("--environment", help="CloudReactor deployment environment")
+    parser.add_argument(
+        "--log-level",
+        help=f"Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL). Defaults to {DEFAULT_LOG_LEVEL}.",
+    )
 
     args = parser.parse_args()
 
-    cloudreactor_deployment_environment = args.environment or 'production'
+    cloudreactor_deployment_environment = args.environment or "production"
 
-    if cloudreactor_deployment_environment != 'production':
-        print(f"Using CloudReactor deployment environment '{cloudreactor_deployment_environment}'")
+    if cloudreactor_deployment_environment != "production":
+        print(
+            f"Using CloudReactor deployment environment '{cloudreactor_deployment_environment}'"
+        )
 
-    log_level = (args.log_level or os.environ.get('WIZARD_LOG_LEVEL', DEFAULT_LOG_LEVEL)).upper()
+    log_level = (
+        args.log_level or os.environ.get("WIZARD_LOG_LEVEL", DEFAULT_LOG_LEVEL)
+    ).upper()
     numeric_log_level = getattr(logging, log_level, None)
     if not isinstance(numeric_log_level, int):
-        logging.warning(f"Invalid log level: {log_level}, defaulting to {DEFAULT_LOG_LEVEL}")
+        logging.warning(
+            f"Invalid log level: {log_level}, defaulting to {DEFAULT_LOG_LEVEL}"
+        )
         numeric_log_level = getattr(logging, DEFAULT_LOG_LEVEL, None)
 
-    logging.basicConfig(level=numeric_log_level,
-                        format='%(levelname)s: %(message)s')
+    logging.basicConfig(level=numeric_log_level, format="%(levelname)s: %(message)s")
     print_banner()
 
-    print("""
+    print(
+        """
 Welcome to the CloudReactor AWS setup wizard!
 
 This wizard can help you set up an ECS cluster and VPC suitable for running tasks in Docker
@@ -2200,7 +2480,8 @@ Tips:
 - When responding to questions, default answers are in square brackets, like [SOMEDEFAULT].
   Hitting enter will use the default answer.
 
-""")
+"""
+    )
 
     wizard = None
 
@@ -2208,14 +2489,17 @@ Tips:
         try:
             with open(SAVED_STATE_FILENAME) as f:
                 wizard = jsonpickle.decode(f.read())
-                wizard.set_cloudreactor_deployment_environment(cloudreactor_deployment_environment)
+                wizard.set_cloudreactor_deployment_environment(
+                    cloudreactor_deployment_environment
+                )
         except Exception:
             print("Couldn't read save file, starting over. Sorry about that!")
     else:
-        print('No save file found, starting a new save file.')
+        print("No save file found, starting a new save file.")
 
     if wizard is None:
         wizard = Wizard(
-            cloudreactor_deployment_environment=cloudreactor_deployment_environment)
+            cloudreactor_deployment_environment=cloudreactor_deployment_environment
+        )
 
     wizard.run()

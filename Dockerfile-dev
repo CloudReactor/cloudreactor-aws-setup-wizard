@@ -2,6 +2,7 @@ FROM cloudreactor-aws-setup-wizard
 
 COPY ./requirements.txt .
 COPY ./dev-requirements.in .
+COPY ./dev-requirements.txt .
 
 RUN pip-compile --allow-unsafe --generate-hashes \
   dev-requirements.in --output-file dev-requirements.txt
