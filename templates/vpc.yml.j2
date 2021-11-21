@@ -198,6 +198,8 @@ Resources:
   {% endfor %}
 
   {% if private_az_letters | length > 0 %}
+
+  {% if vpc_endpoints | length > 0 %}
   VPCEndpointSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -207,6 +209,9 @@ Resources:
       SecurityGroupIngress:
         - CidrIp: {{ vpc_cidr }}
           IpProtocol: -1
+  {% endif %}
+
+  {% if 'ECR' in vpc_endpoints %}
   ECRAPIVPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
@@ -219,16 +224,6 @@ Resources:
         - !Ref VPCEndpointSecurityGroup
       ServiceName: !Join [ '', [ 'com.amazonaws.', { 'Ref': 'AWS::Region' }, '.ecr.api' ] ]
       PrivateDnsEnabled: true
-      VpcId: !Ref VPC
-  S3VPCEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcEndpointType: Gateway
-      RouteTableIds:
-        {% for az_letter in private_az_letters %}
-        - !Ref RouteTable{{az_letter}}Private
-        {% endfor %}
-      ServiceName: !Join [ '', [ 'com.amazonaws.', { 'Ref': 'AWS::Region' }, '.s3' ] ]
       VpcId: !Ref VPC
   ECRDKRVPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -243,6 +238,22 @@ Resources:
       ServiceName: !Join [ '', [ 'com.amazonaws.', { 'Ref': 'AWS::Region' }, '.ecr.dkr' ] ]
       PrivateDnsEnabled: true
       VpcId: !Ref VPC
+  {% endif %}
+
+  {% if 'S3' in vpc_endpoints %}
+  S3VPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        {% for az_letter in private_az_letters %}
+        - !Ref RouteTable{{az_letter}}Private
+        {% endfor %}
+      ServiceName: !Join [ '', [ 'com.amazonaws.', { 'Ref': 'AWS::Region' }, '.s3' ] ]
+      VpcId: !Ref VPC
+  {% endif %}
+
+  {% if 'CloudWatch' in vpc_endpoints %}
   CloudWatchVPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
@@ -256,6 +267,8 @@ Resources:
       ServiceName: !Join [ '', [ 'com.amazonaws.', { 'Ref': 'AWS::Region' }, '.logs' ] ]
       PrivateDnsEnabled: true
       VpcId: !Ref VPC
+  {% endif %}
+
   DefaultTaskSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
@@ -265,7 +278,7 @@ Resources:
 Outputs:
   TemplateVersion:
     Description: 'Template version'
-    Value: '10.0.0'
+    Value: '11.0.0'
   StackName:
     Description: 'Stack name'
     Value: !Sub '${AWS::StackName}'

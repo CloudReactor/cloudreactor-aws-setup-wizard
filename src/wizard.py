@@ -1468,7 +1468,6 @@ this wizard will update it.
 
         logging.debug(f"Got availability zones: {azs}")
 
-        print(f"Got availability zones: {azs}")
         az_name_to_id = {}
         for az in azs:
             az_name_to_id[az["ZoneName"]] = az["ZoneId"]
@@ -1516,8 +1515,9 @@ private subnets may be more secure than running them in a public subnet.
 However, each private subnet requires a relatively expensive NAT gateway
 (both hourly costs and bandwidth costs) to make requests to the public internet.
 
-NAT Gateways are required for Tasks that are monitored by CloudReactor, because
-the Tasks need to notify CloudReactor that they are starting and ending.
+NAT Gateways are required for Tasks running on private subnets that are
+monitored by CloudReactor, because the Tasks need to notify CloudReactor that
+they are starting and ending.
 
 Each NAT Gateway connects a private subnet to a public subnet, so ensure you
 create your private subnets that require NAT Gateways in the same Availability
@@ -1535,6 +1535,7 @@ Application Load Balancer.
         ).ask()
 
         selected_private_azs_with_nat = selected_private_azs
+        selected_vpc_endpoints: list[str] = []
 
         if len(selected_private_azs) == 0:
             print("No subnets in private Availability Zones will be created.")
@@ -1563,37 +1564,76 @@ creator.
                     choices=choices,
                 ).ask()
 
-        second_octet = 0
-        done = False
-        while not done:
-            rv = questionary.text(
-                "The subnets will be in the range 10.[n].0.0/16. What should n be? [0]"
+            second_octet = 0
+            done = False
+            while not done:
+                rv = questionary.text(
+                    "The subnets will be in the range 10.[n].0.0/16. What should n be? [0]"
+                ).ask()
+
+                if rv is None:
+                    return None
+
+                second_octet = 0
+                if rv:
+                    try:
+                        second_octet = int(rv)
+                    except ValueError:
+                        print("n should be between 0 and 255.")
+                        continue
+
+                    if second_octet < 0 or second_octet > 255:
+                        print("n should be between 0 and 255.")
+                        continue
+                else:
+                    second_octet = 0
+
+                done = True
+
+            print(
+                """
+VPC endpoints reduce bandwidth costs by directly connecting applications to
+AWS services, avoiding expensive NAT Gateway charges.
+This wizard always adds a VPC endpoint for S3 to each private subnet, since
+they are free and may reduce bandwidth costs significantly.
+    """
+            )
+
+            # Note: to support the EC2 launch type we should add interface VPC
+            # endpoints for ECS. See
+            # https://docs.aws.amazon.com/AmazonECR/latest/userguide/vpc-endpoints.html
+            # The ECR option below creates both the ecr.dkr and ecr.api
+            # endpoints as required for Fargate 1.4.0 or later. It might not be
+            # necessary for the EC2 launch type.
+            choices = [
+                Choice(
+                    "ECR -- reduces bandwidth costs of transferring Docker images, expecially when a Task is misconfigured. Costs $0.02 per hour per availability zone.",
+                    value="ECR",
+                    checked=True,
+                ),
+                Choice(
+                    "CloudWatch -- reduces bandwith costs logging to CloudWatch. Costs $0.01 per hour per availability zone.",
+                    value="CloudWatch",
+                    checked=True,
+                ),
+            ]
+
+            selected_vpc_endpoints = questionary.checkbox(
+                "Which VPC Endpoints do you want to setup?",
+                choices=choices,
             ).ask()
 
-            if rv is None:
+            if selected_vpc_endpoints is None:
                 return None
 
-            second_octet = 0
-            if rv:
-                try:
-                    second_octet = int(rv)
-                except ValueError:
-                    print("n should be between 0 and 255.")
-                    continue
-
-                if second_octet < 0 or second_octet > 255:
-                    print("n should be between 0 and 255.")
-                    continue
-            else:
-                second_octet = 0
-
-            done = True
+            selected_vpc_endpoints.append("S3")
 
         vpc_template = self.make_vpc_template(
             public_azs=selected_public_azs,
             private_azs=selected_private_azs,
             private_azs_with_nat=selected_private_azs_with_nat,
             second_octet=second_octet,
+            vpc_endpoints=selected_vpc_endpoints,
         )
 
         logging.debug("vpc_template = ")
@@ -1665,6 +1705,7 @@ creator.
         private_azs: list[str],
         private_azs_with_nat: list[str],
         second_octet: int,
+        vpc_endpoints: list[str],
     ) -> str:
 
         public_az_letters = [az[-1].upper() for az in public_azs]
@@ -1685,6 +1726,7 @@ creator.
             "private_az_letters": private_az_letters,
             "private_az_with_nat_letters": private_az_with_nat_letters,
             "second_octet": second_octet,
+            "vpc_endpoints": vpc_endpoints,
         }
 
         return template.render(data)
