@@ -20,7 +20,7 @@ jobs:
         pip install -r requirements.txt -r dev-requirements.txt
 
     - name: flake8
-      run: "flake8 --config src/.flake8 src"
+      run: "flake8 src"
       env:
         PYTHONPATH: src
 
