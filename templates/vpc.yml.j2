@@ -211,20 +211,7 @@ Resources:
           IpProtocol: -1
   {% endif %}
 
-  {% if 'ECR' in vpc_endpoints %}
-  ECRAPIVPCEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcEndpointType: Interface
-      SubnetIds:
-        {% for az_letter in private_az_letters %}
-        - !Ref Subnet{{az_letter}}Private
-        {% endfor %}
-      SecurityGroupIds:
-        - !Ref VPCEndpointSecurityGroup
-      ServiceName: !Join [ '', [ 'com.amazonaws.', { 'Ref': 'AWS::Region' }, '.ecr.api' ] ]
-      PrivateDnsEnabled: true
-      VpcId: !Ref VPC
+  {% if 'ECR_DKR' in vpc_endpoints %}
   ECRDKRVPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
@@ -240,6 +227,22 @@ Resources:
       VpcId: !Ref VPC
   {% endif %}
 
+  {% if 'ECR_API' in vpc_endpoints %}
+  ECRAPIVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      SubnetIds:
+        {% for az_letter in private_az_letters %}
+        - !Ref Subnet{{az_letter}}Private
+        {% endfor %}
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      ServiceName: !Join [ '', [ 'com.amazonaws.', { 'Ref': 'AWS::Region' }, '.ecr.api' ] ]
+      PrivateDnsEnabled: true
+      VpcId: !Ref VPC
+  {% endif %}
+
   {% if 'S3' in vpc_endpoints %}
   S3VPCEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -250,6 +253,19 @@ Resources:
         - !Ref RouteTable{{az_letter}}Private
         {% endfor %}
       ServiceName: !Join [ '', [ 'com.amazonaws.', { 'Ref': 'AWS::Region' }, '.s3' ] ]
+      VpcId: !Ref VPC
+  {% endif %}
+
+  {% if 'DynamoDB' in vpc_endpoints %}
+  DynamoDBVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        {% for az_letter in private_az_letters %}
+        - !Ref RouteTable{{az_letter}}Private
+        {% endfor %}
+      ServiceName: !Join [ '', [ 'com.amazonaws.', { 'Ref': 'AWS::Region' }, '.dynamodb' ] ]
       VpcId: !Ref VPC
   {% endif %}
 

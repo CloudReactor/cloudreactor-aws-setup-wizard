@@ -1510,10 +1510,10 @@ a web server to public subnets, ensure you create at subnets in at least
 
         print(
             """
-Private subnets are inaccessible from the private internet, so running tasks in
+Private subnets are inaccessible from the private internet, so running Tasks in
 private subnets may be more secure than running them in a public subnet.
 However, each private subnet requires a relatively expensive NAT gateway
-(both hourly costs and bandwidth costs) to make requests to the public internet.
+($32.40 per month plus $0.045 per GB) to make requests to the public internet.
 
 NAT Gateways are required for Tasks running on private subnets that are
 monitored by CloudReactor, because the Tasks need to notify CloudReactor that
@@ -1553,11 +1553,10 @@ Application Load Balancer.
                     """
 The public and private Availability Zones you selected have no zones in common.
 Therefore, none of your private Availability Zones will have access to the
-public internet. If this is not desired, press Control-C to abort the VPC
-creator.
+public internet, including access to report progress to CloudReactor.
+If this is not desired, press Control-C to abort the VPC creator.
                 """
                 )
-
             else:
                 selected_private_azs_with_nat = questionary.checkbox(
                     "Which Availability Zones do you want to add NAT Gateways to?",
@@ -1593,10 +1592,10 @@ creator.
             print(
                 """
 VPC endpoints reduce bandwidth costs by directly connecting applications to
-AWS services, avoiding expensive NAT Gateway charges.
-This wizard always adds a VPC endpoint for S3 to each private subnet, since
-they are free and may reduce bandwidth costs significantly.
-    """
+AWS services, avoiding expensive NAT Gateway bandwidth charges.
+This wizard always adds VPC endpoints for S3 and DynamoDB to each private subnet,
+since they are free and may reduce bandwidth costs significantly.
+"""
             )
 
             # Note: to support the EC2 launch type we should add interface VPC
@@ -1605,28 +1604,56 @@ they are free and may reduce bandwidth costs significantly.
             # The ECR option below creates both the ecr.dkr and ecr.api
             # endpoints as required for Fargate 1.4.0 or later. It might not be
             # necessary for the EC2 launch type.
-            choices = [
-                Choice(
-                    "ECR -- reduces bandwidth costs of transferring Docker images, expecially when a Task is misconfigured. Costs $0.02 per hour per availability zone.",
-                    value="ECR",
-                    checked=True,
-                ),
-                Choice(
-                    "CloudWatch -- reduces bandwith costs logging to CloudWatch. Costs $0.01 per hour per availability zone.",
-                    value="CloudWatch",
-                    checked=True,
-                ),
-            ]
 
-            selected_vpc_endpoints = questionary.checkbox(
-                "Which VPC Endpoints do you want to setup?",
-                choices=choices,
-            ).ask()
+            if len(selected_private_azs_with_nat) == 0:
+                print(
+                    """
+Since none of your private subnets have a NAT gateway, your ECS Tasks running
+with Fargate require VPN interface endpoints for ECR DKR, ECR API, and
+CloudWatch logging, for a total cost of about $21.60 per month per private
+subnet.
+    """
+                )
 
-            if selected_vpc_endpoints is None:
-                return None
+                selected_vpc_endpoints = ["ECR_DKR", "ECR_API", "CloudWatch"]
+            else:
+                print(
+                    """
+For your private subnets that will be connected to a NAT gateway, adding
+VPC interface endpoints is optional but may significantly reduce NAT bandwidth
+charges ($0.045 per GB). Each VPC interface endpoint costs about $7.20
+per month per private subnet.
+    """
+                )
+
+                choices = [
+                    Choice(
+                        "ECR DKR -- reduces bandwidth costs of transferring Docker images, expecially when a Task is misconfigured",
+                        value="ECR_DKR",
+                        checked=True,
+                    ),
+                    Choice(
+                        "ECR API -- reduces bandwidth costs of performing API calls to ECR",
+                        value="ECR_API",
+                        checked=False,
+                    ),
+                    Choice(
+                        "CloudWatch -- reduces bandwith costs logging to CloudWatch",
+                        value="CloudWatch",
+                        checked=True,
+                    ),
+                ]
+
+                selected_vpc_endpoints = questionary.checkbox(
+                    "Which VPC Endpoints do you want to setup?",
+                    choices=choices,
+                ).ask()
+
+                if selected_vpc_endpoints is None:
+                    return None
 
             selected_vpc_endpoints.append("S3")
+            selected_vpc_endpoints.append("DynamoDB")
 
         vpc_template = self.make_vpc_template(
             public_azs=selected_public_azs,
