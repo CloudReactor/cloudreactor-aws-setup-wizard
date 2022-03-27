@@ -106,6 +106,7 @@ class Wizard(object):
         self.available_cluster_arns: Optional[list[str]] = None
         self.cluster_arn: Optional[str] = None
         self.vpc_id: Optional[str] = None
+        self.vpc_name: Optional[str] = None
         self.was_vpc_created_by_wizard: Optional[bool] = None
         self.subnets: Optional[list[str]] = None
         self.security_groups: Optional[list[str]] = None
@@ -161,6 +162,7 @@ class Wizard(object):
         self.available_cluster_arns = None
         self.cluster_arn = None
         self.vpc_id = None
+        self.vpc_name = None
         self.was_vpc_created_by_wizard = None
         self.subnets = None
         self.security_groups = None
@@ -1100,6 +1102,7 @@ The access key and secret key are not sent to CloudReactor.
                 output_value = output["OutputValue"]
                 if output_key == "VPC":
                     self.vpc_id = output_value
+                    self.vpc_name = None
                     logging.debug(f"Got VPC {self.vpc_id} from stack output")
                 elif output_key == "SubnetsPrivate":
                     self.subnets = output_value.split(",")
@@ -1405,33 +1408,52 @@ You must set your AWS credentials before creating or selecting security groups.
         return None
 
     def ask_for_vpc(self, ec2_client) -> Optional[str]:
-        vpc_ids = self.list_vpcs(ec2_client)
+        vpcs = self.list_vpcs(ec2_client)
+        vpc_ids = [vpc["id"] for vpc in vpcs]
+
         create_choice = "Create a new VPC ..."
 
-        if vpc_ids:
+        if vpcs:
             choices = []
 
             current_vpc_choice = None
             if self.vpc_id and (self.vpc_id in vpc_ids):
-                current_vpc_choice = self.vpc_id + " (current)"
+                current_vpc_choice = self.vpc_id
+
+                if self.vpc_name:
+                    current_vpc_choice += f" [{self.vpc_name}]"
+
+                current_vpc_choice += " (current)"
                 choices.append(current_vpc_choice)
-                vpc_ids.remove(self.vpc_id)
-                choices += vpc_ids
-            else:
-                choices += vpc_ids
+
+                vpcs = [vpc for vpc in vpcs if vpc["id"] != self.vpc_id]
+
+            vpc_choice_to_vpc = {}
+
+            for vpc in vpcs:
+                vpc_id = vpc["id"]
+                vpc_choice = vpc_id
+                vpc_name = vpc["name"]
+                if vpc_name:
+                    vpc_choice += f" [{vpc_name}]"
+
+                choices.append(vpc_choice)
+                vpc_choice_to_vpc[vpc_choice] = vpc
 
             choices.append(create_choice)
 
-            vpc_id = questionary.select(
+            selected_vpc_choice = questionary.select(
                 "Which VPC do you want to use?", choices=choices
             ).ask()
 
-            if vpc_id is None:
+            if selected_vpc_choice is None:
                 return None
 
-            if vpc_id != create_choice:
-                if vpc_id != current_vpc_choice:
-                    self.vpc_id = vpc_id
+            if selected_vpc_choice != create_choice:
+                if selected_vpc_choice != current_vpc_choice:
+                    selected_vpc = vpc_choice_to_vpc[selected_vpc_choice]
+                    self.vpc_id = selected_vpc["id"]
+                    self.vpc_name = selected_vpc["name"]
                     self.save()
                 return vpc_id
         else:
@@ -1442,6 +1464,7 @@ You must set your AWS credentials before creating or selecting security groups.
 
         return self.create_vpc()
 
+    # TODO: allow user to give the VPC a name
     def create_vpc(self) -> Optional[str]:
         print(
             """
@@ -1721,6 +1744,7 @@ per month per private subnet.
                 return None
 
             self.vpc_id = vpc_id
+            self.vpc_name = None
 
         print(f"Successfully created VPC {self.vpc_id} in region {self.aws_region}.")
 
@@ -2267,6 +2291,7 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
             self.saved_run_environment_uuid = None
             self.cluster_arn = None
             self.vpc_id = None
+            self.vpc_name = None
             self.subnets = None
             self.security_groups = None
             self.was_vpc_created_by_wizard = None
@@ -2311,7 +2336,9 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
         return (
             "https://cloudreactor-customer-setup"
             + host_qualifier
-            + ".s3-us-west-2.amazonaws.com/cloudreactor-aws-role-template-"
+            + ".s3-"
+            + self.aws_region
+            + ".amazonaws.com/cloudreactor-aws-role-template-"
             + str(self.role_template_major_version)
             + file_qualifier
             + ".json"
@@ -2420,7 +2447,20 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
 
         vpcs = resp["Vpcs"]
         print(f"Found {len(vpcs)} VPC(s) in region {self.aws_region}.")
-        return [vpc["VpcId"] for vpc in vpcs]
+        return [
+            {"id": vpc["VpcId"], "name": self.find_name_in_tags(vpc.get("Tags"))}
+            for vpc in vpcs
+        ]
+
+    def find_name_in_tags(self, tags: Optional[list[dict[str, str]]]) -> Optional[str]:
+        if not tags:
+            return None
+
+        for tag in tags:
+            if tag.get("Key", "").lower() == "name":
+                return tag.get("Value")
+
+        return None
 
     def list_subnets(self, ec2_client) -> Optional[list[Any]]:
         if not self.vpc_id:
