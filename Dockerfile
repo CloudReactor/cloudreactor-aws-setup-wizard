@@ -1,14 +1,13 @@
 # Alpine base image can lead to long compilation times and errors.
 # https://pythonspeed.com/articles/base-image-python-docker-images/
-FROM python:3.9.8-slim-buster
+FROM python:3.9.14-slim-buster
 
 LABEL maintainer="jeff@cloudreactor.io"
 
 WORKDIR /usr/app
 
-RUN pip install --no-input --no-cache-dir --upgrade pip==21.1.1
-RUN pip install --no-input --no-cache-dir pip-tools==5.5.0 MarkupSafe==1.1.1 \
-  requests==2.24.0
+RUN pip install --no-input --no-cache-dir --upgrade pip==22.2.2
+RUN pip install --no-input --no-cache-dir pip-tools==6.9.0 requests==2.28.1
 
 COPY requirements.in .
 COPY requirements.txt .
