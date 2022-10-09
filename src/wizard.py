@@ -204,14 +204,19 @@ class Wizard(object):
             if v is not None:
                 if attr == "aws_access_key":
                     if self.aws_account_id:
-                        v += " (validated)"
+                        if v == NO_ACCESS_KEY:
+                            v = "(not required)"
+                        else:
+                            v += " (validated)"
                     else:
                         v += " (unvalidated)"
                 if attr == "aws_secret_key":
-                    if v != NO_ACCESS_KEY:
-                        v = self.obfuscate_string(v)
                     if self.aws_account_id:
-                        v += " (validated)"
+                        if v == NO_ACCESS_KEY:
+                            v = "(not required)"
+                        else:
+                            v = self.obfuscate_string(v)
+                            v += " (validated)"
                     else:
                         v += " (unvalidated)"
                 elif attr == "cloudreactor_credentials":
@@ -1270,8 +1275,8 @@ You must set your AWS credentials before selecting or creating subnets.
             choices = ["Use previously entered subnets: " + subnets_str]
 
         choices += [
-            "Create a new VPC which includes subnets, or use an existing VPC set up by this wizard",
-            "Select existing subnet(s)",
+            "Create a new VPC which includes subnets",
+            "Select existing subnet(s) which may have been created in an existing VPC set up by this wizard",
             # 'Enter subnets manually',
             "Skip subnets",
         ]
@@ -1356,7 +1361,7 @@ You must set your AWS credentials before creating or selecting security groups.
 
         choices += [
             "Create a new VPC which includes a default security group",
-            "Select existing security group(s)",
+            "Select existing security group(s) which may have been created by this wizard",
             # 'Enter security groups manually',
             "Skip security groups",
         ]
@@ -1520,6 +1525,9 @@ a web server to public subnets, ensure you create at subnets in at least
             choices=choices,
         ).ask()
 
+        if selected_public_azs is None:
+            return None
+
         print(f"Selected public Availability Zones = {selected_public_azs}")
 
         choices = [
@@ -1557,6 +1565,9 @@ Application Load Balancer.
             choices=choices,
         ).ask()
 
+        if selected_private_azs is None:
+            return None
+
         selected_private_azs_with_nat = selected_private_azs
         selected_vpc_endpoints: list[str] = []
 
@@ -1585,6 +1596,9 @@ If this is not desired, press Control-C to abort the VPC creator.
                     "Which Availability Zones do you want to add NAT Gateways to?",
                     choices=choices,
                 ).ask()
+
+                if selected_private_azs_with_nat is None:
+                    return None
 
             second_octet = 0
             done = False
@@ -2336,9 +2350,7 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
         return (
             "https://cloudreactor-customer-setup"
             + host_qualifier
-            + ".s3-"
-            + self.aws_region
-            + ".amazonaws.com/cloudreactor-aws-role-template-"
+            + ".s3-us-west-2.amazonaws.com/cloudreactor-aws-role-template-"
             + str(self.role_template_major_version)
             + file_qualifier
             + ".json"
