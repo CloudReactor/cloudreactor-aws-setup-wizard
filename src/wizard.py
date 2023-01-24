@@ -20,7 +20,8 @@ from questionary import Choice
 from cloudreactor_api_client import CloudReactorApiClient
 
 DEFAULT_LOG_LEVEL = "ERROR"
-SAVED_STATE_FILENAME = "./saved_state/saved_settings.json"
+SAVED_STATE_DIRECTORY = "./saved_state"
+SAVED_STATE_FILENAME = SAVED_STATE_DIRECTORY + "/saved_settings.json"
 DEFAULT_SUFFIX = " (Default)"
 UNSET_STRING = "(Not Set)"
 EMPTY_LIST_STRING = "(Empty list, to be entered manually later)"
@@ -2617,6 +2618,9 @@ Tips:
             print("Couldn't read save file, starting over. Sorry about that!")
     else:
         print("No save file found, starting a new save file.")
+
+        if not os.path.isdir(SAVED_STATE_DIRECTORY):
+            os.makedirs(SAVED_STATE_DIRECTORY, exist_ok=True)
 
     if wizard is None:
         wizard = Wizard(
