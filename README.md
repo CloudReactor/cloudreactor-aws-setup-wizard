@@ -47,7 +47,7 @@ save settings.
 
 ### Without Docker (native execution)
 
-First install native python 3.9.x or above. Then clone this repo.
+First install native python 3.11.x or above. Then clone this repo.
 In a terminal window, navigate to the repo. Then:
 
     pip install -r requirements.txt
