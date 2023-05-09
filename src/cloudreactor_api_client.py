@@ -5,14 +5,31 @@ from typing import Any, Optional, cast
 
 import urllib3
 
-CLOUDREACTOR_API_BASE_URL = os.environ.get(
-    "CLOUDREACTOR_API_BASE_URL", "https://api.cloudreactor.io"
-)
+DEFAULT_CLOUDREACTOR_API_BASE_URL = "https://api.cloudreactor.io"
 
 
 class CloudReactorApiClient(object):
-    def __init__(self, username: str, password: str) -> None:
-        logging.debug(f"CloudReactor Base URL = '{CLOUDREACTOR_API_BASE_URL}'")
+    def __init__(
+        self,
+        username: str,
+        password: str,
+        cloudreactor_deployment_environment: Optional[str] = None,
+    ) -> None:
+        api_base_url = os.environ.get("CLOUDREACTOR_API_BASE_URL")
+
+        if api_base_url:
+            self.api_base_url = api_base_url.removesuffix("/")
+        else:
+            if (not cloudreactor_deployment_environment) or (
+                cloudreactor_deployment_environment == "production"
+            ):
+                self.api_base_url = DEFAULT_CLOUDREACTOR_API_BASE_URL
+            else:
+                self.api_base_url = (
+                    f"https://api.{cloudreactor_deployment_environment}.cloudreactor.io"
+                )
+
+        logging.debug(f"CloudReactor Base URL = '{self.api_base_url}'")
 
         self.username = username
         self.password = password
@@ -27,7 +44,7 @@ class CloudReactorApiClient(object):
 
         r = self.http.request(
             "POST",
-            CLOUDREACTOR_API_BASE_URL + "/auth/jwt/create/",
+            self.api_base_url + "/auth/jwt/create/",
             body=json.dumps(data),
             headers={"Accept": "application/json", "Content-Type": "application/json"},
             timeout=10.0,
@@ -95,7 +112,7 @@ class CloudReactorApiClient(object):
 
         r = self.http.request(
             method,
-            CLOUDREACTOR_API_BASE_URL + "/api/v1/" + path,
+            self.api_base_url + "/api/v1/" + path,
             fields=params,
             headers=headers,
             body=body,

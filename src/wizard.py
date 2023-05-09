@@ -60,6 +60,7 @@ ECS_CLUSTER_NAME_REGEX = re.compile(r"[a-zA-Z][-a-zA-Z0-9]{0,254}")
 DEFAULT_ECS_CLUSTER_NAME = "staging"
 
 DEFAULT_DEPLOYMENT_ENVIRONMENT_NAME = "staging"
+DEPLOYMENT_ENVIRONMENT_REGEX = re.compile(r"[a-zA-Z0-9]{1,255}")
 
 KEY_LENGTH = 32
 
@@ -548,21 +549,30 @@ The access key and secret key are not sent to CloudReactor.
             or self.make_default_deployment_environment_name()
         )
 
-        q = "What do you want to name your deployment environment?"
+        good_name = False
+        while not good_name:
+            q = "What do you want to name your deployment environment?"
 
-        if default_deployment_environment:
-            q += f" [{default_deployment_environment}]"
+            if default_deployment_environment:
+                q += f" [{default_deployment_environment}]"
 
-        deployment_environment = questionary.text(q).ask()
+            deployment_environment = questionary.text(q).ask()
 
-        if deployment_environment is None:
-            return None
-
-        if not deployment_environment:
-            deployment_environment = default_deployment_environment
+            if deployment_environment is None:
+                return None
 
             if not deployment_environment:
-                return None
+                deployment_environment = default_deployment_environment
+
+                if not deployment_environment:
+                    return None
+
+            if DEPLOYMENT_ENVIRONMENT_REGEX.fullmatch(deployment_environment) is None:
+                print(
+                    f"'{deployment_environment}' is not a valid deployment environment name. It must consist only of alphanumeric characters (no spaces, hyphens, underscores, or special characters) and be less than 256 characters."
+                )
+            else:
+                good_name = True
 
         if old_deployment_environment and (
             deployment_environment != old_deployment_environment
@@ -699,7 +709,7 @@ The access key and secret key are not sent to CloudReactor.
                     )
                 elif CLOUDFORMATION_STACK_NAME_REGEX.fullmatch(stack_name) is None:
                     print(
-                        f"'{stack_name}' is not a valid CloudFormation stack name. Stack names can only contain alphanumeric characters and dashes, no underscores."
+                        f"'{stack_name}' is not a valid CloudFormation stack name. Stack names can only contain alphanumeric characters and hyphens, no underscores."
                     )
                 else:
                     print(f"New stack will be named '{stack_name}'.\n")
@@ -863,7 +873,7 @@ The access key and secret key are not sent to CloudReactor.
 
             if ECS_CLUSTER_NAME_REGEX.fullmatch(cluster_name) is None:
                 print(
-                    f"'{cluster_name}' is not a valid ECS cluster name. cluster names can only contain alphanumeric characters and dashes, no underscores."
+                    f"'{cluster_name}' is not a valid ECS cluster name. cluster names can only contain alphanumeric characters and hyphens, no underscores."
                 )
                 cluster_name = None
             else:
@@ -2011,7 +2021,9 @@ which allows outbound access to the public internet.
                 return None
 
         cloudreactor_api_client = CloudReactorApiClient(
-            username=username, password=password
+            username=username,
+            password=password,
+            cloudreactor_deployment_environment=self.cloudreactor_deployment_environment,
         )
 
         print()
@@ -2092,6 +2104,7 @@ which allows outbound access to the public internet.
                 return CloudReactorApiClient(
                     username=self.cloudreactor_credentials[0],
                     password=self.cloudreactor_credentials[1],
+                    cloudreactor_deployment_environment=self.cloudreactor_deployment_environment,
                 )
 
         return None
@@ -2190,29 +2203,51 @@ which allows outbound access to the public internet.
                 if not run_environment_name:
                     return None
 
-        ecs_caps = {
-            "type": "AWS ECS",
-            "default_launch_type": "FARGATE",
-            "supported_launch_types": ["FARGATE"],
-            "default_cluster_arn": self.cluster_arn,
-            "default_execution_role": self.task_execution_role_arn,
+        aws_settings = {
+            "account_id": self.aws_account_id,
+            "region": self.aws_region,
+            "events_role_arn": self.assumable_role_arn,
+            "assumed_role_external_id": self.external_id,
+            "workflow_starter_lambda_arn": self.workflow_starter_arn,
+            "workflow_starter_access_key": self.workflow_starter_access_key,
         }
 
+        infrastructure_settings = {"AWS": {"__default__": {"settings": aws_settings}}}
+
+        aws_network = {}
+
         if self.subnets:
-            ecs_caps["default_subnets"] = self.subnets
+            aws_network["subnets"] = self.subnets
 
         if self.security_groups:
-            ecs_caps["default_security_groups"] = self.security_groups
+            aws_network["security_groups"] = self.security_groups
+
+        # TODO: make optional on server side, get setting in wizard
+        # aws_network["assign_public_ip"] = False
+
+        if aws_network:
+            aws_network["region"] = self.aws_region
+            aws_settings["network"] = aws_network
+
+        ems = {
+            "AWS ECS": {
+                "__default__": {
+                    "infrastructure_name": "__default__",
+                    "settings": {
+                        "launch_type": "FARGATE",
+                        "supported_launch_types": ["FARGATE"],
+                        "cluster_arn": self.cluster_arn,
+                        "execution_role_arn": self.task_execution_role_arn,
+                        "platform_version": "1.4.0",
+                    },
+                }
+            }
+        }
 
         data: dict[str, Any] = {
             "name": run_environment_name,
-            "aws_account_id": self.aws_account_id,
-            "aws_default_region": self.aws_region,
-            "aws_assumed_role_external_id": self.external_id,
-            "aws_workflow_starter_access_key": self.workflow_starter_access_key,
-            "aws_events_role_arn": self.assumable_role_arn,
-            "aws_workflow_starter_lambda_arn": self.workflow_starter_arn,
-            "execution_method_capabilities": [ecs_caps],
+            "execution_method_settings": ems,
+            "infrastructure_settings": infrastructure_settings,
         }
 
         if run_environment_uuid is None:
@@ -2332,13 +2367,19 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
         if self.saved_run_environment_uuid is None:
             return None
 
-        host_qualifier = ""
-        if self.cloudreactor_deployment_environment != "production":
-            host_qualifier = "." + self.cloudreactor_deployment_environment
+        dashboard_base_url = os.environ.get("CLOUDREACTOR_DASHBOARD_BASE_URL")
 
-        return (
-            f"https://dash{host_qualifier}.cloudreactor.io/run_environments/"
-            + urllib.parse.quote(self.saved_run_environment_uuid)
+        if dashboard_base_url:
+            dashboard_base_url.removesuffix("/")
+        else:
+            host_qualifier = ""
+            if self.cloudreactor_deployment_environment != "production":
+                host_qualifier = "." + self.cloudreactor_deployment_environment
+
+            dashboard_base_url = f"https://dash{host_qualifier}.cloudreactor.io"
+
+        return f"{dashboard_base_url}/run_environments/" + urllib.parse.quote(
+            self.saved_run_environment_uuid
         )
 
     def make_cloudformation_role_template_url(self) -> str:
