@@ -10,19 +10,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - name: Set up Python 3.9
+    - name: Set up Python 3.11
       uses: actions/setup-python@v3
       with:
-        python-version: 3.9
+        python-version: 3.11
+    - uses: abatilo/actions-poetry@v2.1.4
     - name: Install Dependencies
-      run: pip install --no-input --no-cache-dir -r dev-requirements.txt
+      run: poetry install
     - name: flake8
-      run: flake8
+      run: poetry run flake8
     - name: isort
-      run: poetry run isort --verbose --ignore-whitespace .
+      run: poetry run isort --verbose --ignore-whitespace cloudreactor_aws_setup_wizard
     - name: mypy
       run: "poetry run mypy -m cloudreactor_aws_setup_wizard || true"
     - name: Check for library vulnerabilities with pip-audit
-      run: "python -m pip_audit -r requirements.txt"
+      run: poetry run pip_audit -r requirements.txt
     - name: Print final message
       run: "echo Complete"
