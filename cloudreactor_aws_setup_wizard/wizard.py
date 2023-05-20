@@ -1,4 +1,3 @@
-import argparse
 import logging
 import os
 import random
@@ -17,11 +16,12 @@ from botocore.exceptions import ClientError
 from jinja2 import Environment, FileSystemLoader
 from questionary import Choice
 
-from cloudreactor_api_client import CloudReactorApiClient
+from .cloudreactor_api_client import CloudReactorApiClient
 
-DEFAULT_LOG_LEVEL = "ERROR"
 SAVED_STATE_DIRECTORY = "./saved_state"
 SAVED_STATE_FILENAME = SAVED_STATE_DIRECTORY + "/saved_settings.json"
+
+
 DEFAULT_SUFFIX = " (Default)"
 UNSET_STRING = "(Not Set)"
 EMPTY_LIST_STRING = "(Empty list, to be entered manually later)"
@@ -76,11 +76,6 @@ CLOUDFORMATION_IN_PROGRESS_STATUSES = set(
 CLOUDFORMATION_SUCCESSFUL_STATUSES = set(
     ["CREATE_COMPLETE", "UPDATE_COMPLETE", "IMPORT_COMPLETE"]
 )
-
-
-def print_banner():
-    with open("banner.txt") as f:
-        print(f.read())
 
 
 class Wizard(object):
@@ -751,7 +746,7 @@ The access key and secret key are not sent to CloudReactor.
         if self.cloudreactor_deployment_environment and (
             self.cloudreactor_deployment_environment != "production"
         ):
-            name += f"-CR-{cloudreactor_deployment_environment}"
+            name += f"-CR-{self.cloudreactor_deployment_environment}"
 
         if self.deployment_environment:
             name += f"-{self.deployment_environment}"
@@ -1425,11 +1420,9 @@ You must set your AWS credentials before creating or selecting security groups.
 
     def ask_for_vpc(self, ec2_client) -> Optional[str]:
         vpcs = self.list_vpcs(ec2_client)
-        vpc_ids = [vpc["id"] for vpc in vpcs]
-
-        create_choice = "Create a new VPC ..."
 
         if vpcs:
+            vpc_ids = [vpc["id"] for vpc in vpcs]
             choices = []
 
             current_vpc_choice = None
@@ -1444,7 +1437,7 @@ You must set your AWS credentials before creating or selecting security groups.
 
                 vpcs = [vpc for vpc in vpcs if vpc["id"] != self.vpc_id]
 
-            vpc_choice_to_vpc = {}
+            vpc_choice_to_vpc: dict[str, dict[str, Any]] = {}
 
             for vpc in vpcs:
                 vpc_id = vpc["id"]
@@ -1456,6 +1449,7 @@ You must set your AWS credentials before creating or selecting security groups.
                 choices.append(vpc_choice)
                 vpc_choice_to_vpc[vpc_choice] = vpc
 
+            create_choice = "Create a new VPC ..."
             choices.append(create_choice)
 
             selected_vpc_choice = questionary.select(
@@ -2203,7 +2197,7 @@ which allows outbound access to the public internet.
                 if not run_environment_name:
                     return None
 
-        aws_settings = {
+        aws_settings: dict[str, Any] = {
             "account_id": self.aws_account_id,
             "region": self.aws_region,
             "events_role_arn": self.assumable_role_arn,
@@ -2214,7 +2208,7 @@ which allows outbound access to the public internet.
 
         infrastructure_settings = {"AWS": {"__default__": {"settings": aws_settings}}}
 
-        aws_network = {}
+        aws_network: dict[str, Any] = {}
 
         if self.subnets:
             aws_network["subnets"] = self.subnets
@@ -2597,75 +2591,3 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
         if not v:
             return ""
         return v[0] + ("*" * max(len(v) - 2, 0)) + v[-1]
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("--environment", help="CloudReactor deployment environment")
-    parser.add_argument(
-        "--log-level",
-        help=f"Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL). Defaults to {DEFAULT_LOG_LEVEL}.",
-    )
-
-    args = parser.parse_args()
-
-    cloudreactor_deployment_environment = args.environment or "production"
-
-    if cloudreactor_deployment_environment != "production":
-        print(
-            f"Using CloudReactor deployment environment '{cloudreactor_deployment_environment}'"
-        )
-
-    log_level = (
-        args.log_level or os.environ.get("WIZARD_LOG_LEVEL", DEFAULT_LOG_LEVEL)
-    ).upper()
-    numeric_log_level = getattr(logging, log_level, None)
-    if not isinstance(numeric_log_level, int):
-        logging.warning(
-            f"Invalid log level: {log_level}, defaulting to {DEFAULT_LOG_LEVEL}"
-        )
-        numeric_log_level = getattr(logging, DEFAULT_LOG_LEVEL, None)
-
-    logging.basicConfig(level=numeric_log_level, format="%(levelname)s: %(message)s")
-    print_banner()
-
-    print(
-        """
-Welcome to the CloudReactor AWS setup wizard!
-
-This wizard can help you set up an ECS cluster and VPC suitable for running tasks in Docker
-containers using Fargate. You can also use it to enable CloudReactor to monitor and
-manage your tasks.
-
-Tips:
-- You can hit "Control-C" at any time to return to editing settings individually.
-- When responding to questions, default answers are in square brackets, like [SOMEDEFAULT].
-  Hitting enter will use the default answer.
-
-"""
-    )
-
-    wizard = None
-
-    if os.path.isfile(SAVED_STATE_FILENAME):
-        try:
-            with open(SAVED_STATE_FILENAME) as f:
-                wizard = jsonpickle.decode(f.read())
-                wizard.set_cloudreactor_deployment_environment(
-                    cloudreactor_deployment_environment
-                )
-        except Exception:
-            print("Couldn't read save file, starting over. Sorry about that!")
-    else:
-        print("No save file found, starting a new save file.")
-
-        if not os.path.isdir(SAVED_STATE_DIRECTORY):
-            os.makedirs(SAVED_STATE_DIRECTORY, exist_ok=True)
-
-    if wizard is None:
-        wizard = Wizard(
-            cloudreactor_deployment_environment=cloudreactor_deployment_environment
-        )
-
-    wizard.run()

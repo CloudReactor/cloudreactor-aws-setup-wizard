@@ -1,6 +1,0 @@
-boto3>=1.24.89,<2
-questionary>=1.10.0,<2
-jsonpickle>=1.5.2,<2
-urllib3>=1.26.12,<2
-jinja2>=2.11.3<3
-pyyaml>=5.4.1<6

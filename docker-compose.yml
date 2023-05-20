@@ -26,7 +26,6 @@ services:
 
   wizard:
     <<: *service-base
-    entrypoint: python src/wizard.py
 
     # environment:
      # AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
@@ -48,31 +47,16 @@ services:
     <<: *service-base
     entrypoint: bash
 
-  # To update requirements.txt:
-  # docker compose run --rm pip-compile > requirements.txt
-  pip-compile: &pip-compile-base
-    image: aws-setup-wizard
-    entrypoint: pip-compile --allow-unsafe --generate-hashes --output-file=-
-
-  # To update dev-requirements.txt:
-  # docker compose run --rm pip-compile-dev > dev-requirements.txt
-  pip-compile-dev:
-    <<: *pip-compile-base
-    image: aws-setup-wizard_dev
-    build:
-      dockerfile: Dockerfile-dev
-    command: dev-requirements.in
-
   flake8:
     <<: *dev-base
 
   mypy:
     <<: *dev-base
-    entrypoint: ["mypy", "--config-file", "src/mypy.ini", "src"]
+    entrypoint: ["mypy", "--config-file", "mypy.ini", "-p", "cloudreactor_aws_setup_wizard"]
 
-  safety:
+  pip-audit:
     <<: *dev-base
-    entrypoint: ["safety", "check"]
+    entrypoint: pip-audit -r requirements.txt
 
   dev-shell:
     <<: *dev-base

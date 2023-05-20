@@ -1,6 +1,6 @@
 [flake8]
 exclude = docs
-max-line-length = 250
+max-line-length = 88
 
 # We use 2 indents for continuation lines, so:
 # E126 continuation line over-indented for hanging indent

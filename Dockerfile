@@ -7,13 +7,8 @@ LABEL maintainer="jeff@cloudreactor.io"
 WORKDIR /usr/app
 
 RUN pip install --no-input --no-cache-dir --upgrade pip==23.1.2
-RUN pip install --no-input --no-cache-dir pip-tools==6.13.0 requests==2.30.0
 
-COPY requirements.in .
 COPY requirements.txt .
-
-RUN pip-compile --allow-unsafe --generate-hashes \
-  requirements.in --output-file requirements.txt
 
 # install dependencies
 # https://stackoverflow.com/questions/45594707/what-is-pips-no-cache-dir-good-for
@@ -33,9 +28,7 @@ ENV PYTHONFAULTHANDLER 1
 ENV PYTHONPATH /usr/app/src
 
 RUN mkdir ./saved_state
-COPY banner.txt ./
 COPY wizard_config.yml ./
-COPY templates ./templates
-COPY src ./src
+COPY cloudreactor_aws_setup_wizard ./cloudreactor_aws_setup_wizard
 
-ENTRYPOINT ["python", "src/wizard.py"]
+ENTRYPOINT ["python", "-m", "cloudreactor_aws_setup_wizard"]

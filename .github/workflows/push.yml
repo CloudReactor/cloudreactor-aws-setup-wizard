@@ -9,25 +9,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Set up Python 3.9
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v3
       with:
         python-version: 3.9
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt -r dev-requirements.txt
-
+    - name: Install Dependencies
+      run: pip install --no-input --no-cache-dir -r dev-requirements.txt
     - name: flake8
-      run: "flake8 src"
-      env:
-        PYTHONPATH: src
-
+      run: flake8
+    - name: isort
+      run: poetry run isort --verbose --ignore-whitespace .
     - name: mypy
-      run: "mypy src || true"
-      env:
-        PYTHONPATH: src
-
+      run: "poetry run mypy -m cloudreactor_aws_setup_wizard || true"
+    - name: Check for library vulnerabilities with pip-audit
+      run: "python -m pip_audit -r requirements.txt"
     - name: Print final message
       run: "echo Complete"

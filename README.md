@@ -114,6 +114,16 @@ and then
 
     .\wizard.cmd
 
+## Developer notes
+
+To export the library dependencies:
+
+    poetry export --output requirements.txt
+
+To export the dev dependencies:
+
+    poetry export --with dev --output dev-requirements.txt
+
 ## Acknowledgements
 
 * [questionary](https://github.com/tmbo/questionary) for prompts

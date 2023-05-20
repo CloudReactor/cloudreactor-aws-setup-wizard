@@ -1,12 +1,9 @@
 FROM cloudreactor-aws-setup-wizard
 
-COPY ./requirements.txt .
-COPY ./dev-requirements.in .
+COPY .flake8 .
+COPY mypy.ini .
 COPY ./dev-requirements.txt .
 
-RUN pip-compile --allow-unsafe --generate-hashes \
-  dev-requirements.in --output-file dev-requirements.txt
+RUN pip install --no-cache-dir -r dev-requirements.txt
 
-RUN pip install --no-cache-dir -r requirements.txt -r dev-requirements.txt
-
-ENTRYPOINT ["flake8", "--config", "src/.flake8", "src"]
+ENTRYPOINT ["flake8", "--config", ".flake8"]
