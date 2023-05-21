@@ -14,7 +14,7 @@ jobs:
       uses: actions/setup-python@v3
       with:
         python-version: 3.11
-    - uses: abatilo/actions-poetry@v2.1.4
+    - uses: abatilo/actions-poetry@v2.3.0
     - name: Install Dependencies
       run: poetry install
     - name: flake8
@@ -24,6 +24,6 @@ jobs:
     - name: mypy
       run: "poetry run mypy -m cloudreactor_aws_setup_wizard || true"
     - name: Check for library vulnerabilities with pip-audit
-      run: poetry run pip_audit -r requirements.txt
+      run: poetry run pip-audit -r requirements.txt
     - name: Print final message
       run: "echo Complete"
