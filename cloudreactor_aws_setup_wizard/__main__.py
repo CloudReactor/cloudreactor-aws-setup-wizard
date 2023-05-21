@@ -21,7 +21,7 @@ BANNER = r"""
 """
 
 
-if __name__ == "__main__":
+def run():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--environment", help="CloudReactor deployment environment")
@@ -91,3 +91,7 @@ Tips:
         )
 
     wizard.run()
+
+
+if __name__ == "__main__":
+    run()
