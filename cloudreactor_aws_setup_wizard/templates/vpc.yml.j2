@@ -32,6 +32,11 @@ Resources:
       Tags:
       - Key: Name
         Value: {{ vpc_cidr }}
+  DefaultTaskSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'ECS Tasks with no ingress'
+      VpcId: !Ref VPC
   {% if public_az_letters | length > 0 %}
   InternetGateway:
     Type: 'AWS::EC2::InternetGateway'
@@ -284,12 +289,6 @@ Resources:
       PrivateDnsEnabled: true
       VpcId: !Ref VPC
   {% endif %}
-
-  DefaultTaskSecurityGroup:
-    Type: 'AWS::EC2::SecurityGroup'
-    Properties:
-      GroupDescription: 'ECS Tasks with no ingress'
-      VpcId: !Ref VPC
   {% endif %}
 Outputs:
   TemplateVersion:

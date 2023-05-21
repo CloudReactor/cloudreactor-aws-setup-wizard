@@ -13,7 +13,7 @@ import jsonpickle
 import questionary
 import yaml
 from botocore.exceptions import ClientError
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, PackageLoader
 from questionary import Choice
 
 from .cloudreactor_api_client import CloudReactorApiClient
@@ -1505,6 +1505,30 @@ this wizard will update it.
         for az in azs:
             az_name_to_id[az["ZoneName"]] = az["ZoneId"]
 
+        done = False
+        while not done:
+            rv = questionary.text(
+                "The subnets will be in the range 10.[n].0.0/16. What should n be? [0]"
+            ).ask()
+
+            if rv is None:
+                return None
+
+            if rv:
+                try:
+                    second_octet = int(rv)
+                except ValueError:
+                    print("n should be between 0 and 255.")
+                    continue
+
+                if second_octet < 0 or second_octet > 255:
+                    print("n should be between 0 and 255.")
+                    continue
+            else:
+                second_octet = 0
+
+            done = True
+
         print(
             """
 Public subnets are accessible from the public internet and can make requests
@@ -1604,32 +1628,6 @@ If this is not desired, press Control-C to abort the VPC creator.
 
                 if selected_private_azs_with_nat is None:
                     return None
-
-            second_octet = 0
-            done = False
-            while not done:
-                rv = questionary.text(
-                    "The subnets will be in the range 10.[n].0.0/16. What should n be? [0]"
-                ).ask()
-
-                if rv is None:
-                    return None
-
-                second_octet = 0
-                if rv:
-                    try:
-                        second_octet = int(rv)
-                    except ValueError:
-                        print("n should be between 0 and 255.")
-                        continue
-
-                    if second_octet < 0 or second_octet > 255:
-                        print("n should be between 0 and 255.")
-                        continue
-                else:
-                    second_octet = 0
-
-                done = True
 
             print(
                 """
@@ -1786,7 +1784,9 @@ per month per private subnet.
 
         all_az_letters.sort()
 
-        env = Environment(loader=FileSystemLoader("./templates/"))
+        env = Environment(
+            loader=PackageLoader("cloudreactor_aws_setup_wizard", "templates")
+        )
 
         template = env.get_template("vpc.yml.j2")
 
@@ -1851,7 +1851,7 @@ per month per private subnet.
             logging.warning("Failed to install stack", exc_info=True)
             print(f"Failed to install stack: {ex}")
 
-            if ex_str.find("AlreadyExistsException"):
+            if ex_str.find("AlreadyExistsException") >= 0:
                 rv = questionary.confirm("That stack already exists. Delete it?").ask()
                 if rv:
                     self.delete_stack(vpc_stack_name, cf_client)
