@@ -549,7 +549,7 @@ docs = []
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.11"
-content-hash = "24366943bc3adb60d677211b41a9e10af79b579c3fad40d14d8207bb2aa4a655"
+content-hash = "c919be051e511ee2b58528053ac0c30763686d18ee23456143ee19ca9d79e320"
 
 [metadata.files]
 boto3 = [
