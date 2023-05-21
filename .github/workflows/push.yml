@@ -20,7 +20,7 @@ jobs:
     - name: flake8
       run: poetry run flake8
     - name: isort
-      run: poetry run isort --verbose --ignore-whitespace cloudreactor_aws_setup_wizard
+      run: poetry run isort --ignore-whitespace cloudreactor_aws_setup_wizard
     - name: mypy
       run: "poetry run mypy -m cloudreactor_aws_setup_wizard || true"
     - name: Check for library vulnerabilities with pip-audit
