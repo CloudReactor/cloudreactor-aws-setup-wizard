@@ -51,7 +51,11 @@ First install native python 3.11.x or above. Then clone this repo.
 In a terminal window, navigate to the repo. Then:
 
     pip install -r requirements.txt
-    python src/wizard.py
+    python -m cloudreactor_aws_setup_wizard
+
+Or with pipx:
+
+    pipx cloudreactor_aws_setup_wizard
 
 ## Permissions required / granting access
 
@@ -92,6 +96,16 @@ the EC2 instance role (not tested yet)
 
 ## Development
 
+We use [poetry](https://python-poetry.org/) to manage dependencies, build, and publish this library.
+
+To export the library dependencies:
+
+    poetry export --output requirements.txt
+
+To export the dev dependencies:
+
+    poetry export --with dev --output dev-requirements.txt
+
 To run possibly modified source code in development
 
 **On Linux or macOS, run:**
@@ -113,16 +127,6 @@ and then
 and then
 
     .\wizard.cmd
-
-## Developer notes
-
-To export the library dependencies:
-
-    poetry export --output requirements.txt
-
-To export the dev dependencies:
-
-    poetry export --with dev --output dev-requirements.txt
 
 ## Acknowledgements
 

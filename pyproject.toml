@@ -8,7 +8,7 @@ authors = [
 license = "BSD-2-Clause"
 readme = "README.md"
 repository = "https://github.com/CloudReactor/cloudreactor-aws-setup-wizard"
-documentation = "https://cloudreactor-aws-setup-wizard.readthedocs.io"
+# documentation = "https://cloudreactor-aws-setup-wizard.readthedocs.io"
 homepage = "https://cloudreactor.io"
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -24,7 +24,7 @@ packages = [
 
 [tool.poetry.urls]
 "Bug Tracker" = "https://github.com/CloudReactor/cloudreactor-aws-setup-wizard/issues"
-"Changelog" = "https://cloudreactor-aws-setup-wizard.readthedocs.io/changelog.html"
+# "Changelog" = "https://cloudreactor-aws-setup-wizard.readthedocs.io/changelog.html"
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -37,7 +37,7 @@ jinja2 = "^3.1.2"
 pyyaml = "^6.0"
 
 [tool.poetry.scripts]
-cloudreactor_aws_setup_wizard = 'cloudreactor_aws_setup_wizard.__main__:run'
+cloudreactor_aws_setup_wizard = "cloudreactor_aws_setup_wizard.__main__:run"
 
 # Documentation Dependencies
 #Sphinx = {version = "^3.5.4", optional = true}
@@ -48,12 +48,12 @@ cloudreactor_aws_setup_wizard = 'cloudreactor_aws_setup_wizard.__main__:run'
 #Jinja2 = {version = "3.0.3"}
 types-PyYAML = "6.0.12.9"
 
-[tool.poetry.extras]
-docs = [
-    "myst-parser",
-    "sphinx",
-    "sphinx-rtd-theme",
-]
+#[tool.poetry.extras]
+#docs = [
+#    "myst-parser",
+#    "sphinx",
+#    "sphinx-rtd-theme",
+#]
 
 [tool.poetry.dev-dependencies]
 flake8 = "^4.0.1"
