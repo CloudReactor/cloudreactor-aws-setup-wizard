@@ -36,8 +36,8 @@ urllib3 = "^1.26.15"
 jinja2 = "^3.1.2"
 pyyaml = "^6.0"
 
-[tool.poetry.scripts]
-cloudreactor_aws_setup_wizard = "cloudreactor_aws_setup_wizard.__main__:run"
+#[tool.poetry.scripts]
+#cloudreactor_aws_setup_wizard = "cloudreactor_aws_setup_wizard.__main__:run"
 
 # Documentation Dependencies
 #Sphinx = {version = "^3.5.4", optional = true}
