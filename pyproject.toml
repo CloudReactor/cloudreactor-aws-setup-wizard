@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cloudreactor-aws-setup-wizard"
-version = "1.0.0"
+version = "1.0.1"
 description = "A command-line wizard to setup customer environments for running tasks managed by CloudReactor"
 authors = [
     "Jeff Tsay <jeff@cloudreactor.io>"
