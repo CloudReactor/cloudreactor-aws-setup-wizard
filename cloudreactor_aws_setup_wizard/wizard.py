@@ -2480,7 +2480,7 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
 
         return existing_stacks
 
-    def list_vpcs(self, ec2_client) -> Optional[list[str]]:
+    def list_vpcs(self, ec2_client) -> Optional[list[dict[str, Any]]]:
         print(f"Looking for existing VPCs in region {self.aws_region} ...")
 
         resp = None
