@@ -72,6 +72,11 @@ You can give the wizard these permissions in a few different ways:
 
 1) An access key and access secret that you manually enter when prompted by
 the wizard
+
+    ```
+    docker run --rm -it -v $PWD/saved_state:/usr/app/saved_state cloudreactor/aws-setup-wizard
+    ```
+
 2) Passing the access key and the secret key in the environment variables
 `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` respectively when you
 launch the wizard. If you are using Docker to run the wizard:
@@ -90,6 +95,13 @@ launch the wizard. If you are using Docker to run the wizard:
 
 4) If run from an EC2 instance, the wizard should inherit permissions from
 the EC2 instance role (not tested yet)
+
+
+You may use these alternative Docker images instead of `cloudreactor/aws-setup-wizard`
+to get around rate limits or bandwidth charges:
+
+* From AWS public ECR: `public.ecr.aws/x2w9p9b7/cloudreactor_aws_setup_wizard`
+* From GitHub packages: `ghcr.io/cloudreactor/cloudreactor-aws-setup-wizard`
 
 ## Development
 
