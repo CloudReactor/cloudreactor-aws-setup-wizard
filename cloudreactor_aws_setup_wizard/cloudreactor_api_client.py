@@ -5,17 +5,19 @@ from typing import Any, Optional, cast
 
 import urllib3
 
-DEFAULT_CLOUDREACTOR_API_BASE_URL = "https://api.cloudreactor.io"
-
 
 class CloudReactorApiClient(object):
+    DEFAULT_CLOUDREACTOR_API_BASE_URL = "https://api.cloudreactor.io"
+
     def __init__(
         self,
         username: str,
         password: str,
+        api_base_url: Optional[str] = None,
         cloudreactor_deployment_environment: Optional[str] = None,
     ) -> None:
-        api_base_url = os.environ.get("CLOUDREACTOR_API_BASE_URL")
+        if not api_base_url:
+            api_base_url = os.environ.get("CLOUDREACTOR_API_BASE_URL")
 
         if api_base_url:
             self.api_base_url = api_base_url.removesuffix("/")
@@ -23,7 +25,7 @@ class CloudReactorApiClient(object):
             if (not cloudreactor_deployment_environment) or (
                 cloudreactor_deployment_environment == "production"
             ):
-                self.api_base_url = DEFAULT_CLOUDREACTOR_API_BASE_URL
+                self.api_base_url = self.DEFAULT_CLOUDREACTOR_API_BASE_URL
             else:
                 self.api_base_url = (
                     f"https://api.{cloudreactor_deployment_environment}.cloudreactor.io"

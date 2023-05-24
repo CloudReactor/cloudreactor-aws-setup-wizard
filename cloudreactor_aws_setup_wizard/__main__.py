@@ -24,6 +24,7 @@ BANNER = r"""
 def run():
     parser = argparse.ArgumentParser()
 
+    parser.add_argument("--api-base-url", help="CloudReactor API base URL")
     parser.add_argument("--environment", help="CloudReactor deployment environment")
     parser.add_argument(
         "--log-level",
@@ -31,6 +32,8 @@ def run():
     )
 
     args = parser.parse_args()
+
+    api_base_url = args.api_base_url
 
     cloudreactor_deployment_environment = args.environment or "production"
 
@@ -74,8 +77,9 @@ Tips:
         try:
             with open(SAVED_STATE_FILENAME) as f:
                 wizard = jsonpickle.decode(f.read())
-                wizard.set_cloudreactor_deployment_environment(
-                    cloudreactor_deployment_environment
+                wizard.set_options(
+                    api_base_url=api_base_url,
+                    cloudreactor_deployment_environment=cloudreactor_deployment_environment,
                 )
         except Exception:
             print("Couldn't read save file, starting over. Sorry about that!")
@@ -87,7 +91,8 @@ Tips:
 
     if wizard is None:
         wizard = Wizard(
-            cloudreactor_deployment_environment=cloudreactor_deployment_environment
+            api_base_url=api_base_url,
+            cloudreactor_deployment_environment=cloudreactor_deployment_environment,
         )
 
     wizard.run()

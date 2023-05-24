@@ -92,9 +92,15 @@ class Wizard(object):
         "7": ["deployment_environment", "Deployment Environment name"],
         "8": ["stack_name", "CloudReactor permissions CloudFormation stack name"],
         "9": ["cloudreactor_credentials", "CloudReactor credentials"],
+        "10": ["cloudreactor_group", "CloudReactor Group"],
     }
 
-    def __init__(self, cloudreactor_deployment_environment: str) -> None:
+    def __init__(
+        self,
+        api_base_url: Optional[str] = None,
+        cloudreactor_deployment_environment: Optional[str] = None,
+    ) -> None:
+        self.api_base_url = api_base_url
         self.cloudreactor_deployment_environment = cloudreactor_deployment_environment
         self.aws_region: Optional[str] = None
         self.aws_access_key: Optional[str] = None
@@ -181,8 +187,13 @@ class Wizard(object):
         self.stack_upload_status_reason = None
         self.save()
 
-    def set_cloudreactor_deployment_environment(self, deployment: str) -> None:
-        self.cloudreactor_deployment_environment = deployment
+    def set_options(
+        self,
+        api_base_url: Optional[str] = None,
+        cloudreactor_deployment_environment: Optional[str] = None,
+    ) -> None:
+        self.api_base_url = api_base_url
+        self.cloudreactor_deployment_environment = cloudreactor_deployment_environment
 
     def print_menu(self) -> None:
         for choice in self.make_property_choices():
@@ -218,6 +229,8 @@ class Wizard(object):
                         v += " (unvalidated)"
                 elif attr == "cloudreactor_credentials":
                     v = f"{v[0]} / [saved password]"
+                elif attr == "cloudreactor_group":
+                    v = v[1]  # Group name
 
             elif attr in ["subnets", "security_groups"]:
                 v = self.list_to_string(v)
@@ -357,6 +370,8 @@ class Wizard(object):
             return self.ask_for_deployment_environment()
         elif p == "cloudreactor_credentials":
             return self.ask_for_cloudreactor_credentials()
+        elif p == "cloudreactor_group":
+            return self.ask_for_cloudreactor_group()
         elif p == "cluster_arn":
             return self.ask_for_ecs_cluster_arn()
         else:
@@ -2017,6 +2032,7 @@ which allows outbound access to the public internet.
         cloudreactor_api_client = CloudReactorApiClient(
             username=username,
             password=password,
+            api_base_url=self.api_base_url,
             cloudreactor_deployment_environment=self.cloudreactor_deployment_environment,
         )
 
@@ -2098,6 +2114,7 @@ which allows outbound access to the public internet.
                 return CloudReactorApiClient(
                     username=self.cloudreactor_credentials[0],
                     password=self.cloudreactor_credentials[1],
+                    api_base_url=self.api_base_url,
                     cloudreactor_deployment_environment=self.cloudreactor_deployment_environment,
                 )
 
@@ -2131,21 +2148,9 @@ which allows outbound access to the public internet.
             return None
 
         if self.cloudreactor_group is None:
-            # group = self.ask_for_cloudreactor_group()
-
-            groups = cr_api_client.list_groups()["results"]
-
-            if len(groups) == 0:
-                print("No Groups found, please create one on the CloudReactor website.")
+            group = self.ask_for_cloudreactor_group()
+            if group is None:
                 return None
-
-            if len(groups) > 1:
-                t = self.ask_for_cloudreactor_group()
-
-                if not t:
-                    return None
-            else:
-                self.cloudreactor_group = (groups[0]["id"], groups[0]["name"])
 
         cloudreactor_group = cast(Tuple[int, str], self.cloudreactor_group)
         existing_run_environments = cr_api_client.list_run_environments(
