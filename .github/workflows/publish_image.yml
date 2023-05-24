@@ -51,7 +51,7 @@ jobs:
         uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
         with:
           images: |
-            cloudreactor/cloudreactor-aws-setup-wizard
+            cloudreactor/aws-setup-wizard
             ghcr.io/${{ github.repository }}
             public.ecr.aws/x2w9p9b7/cloudreactor_aws_setup_wizard
 

@@ -1,10 +1,6 @@
 # cloudreactor-aws-setup-wizard
 
 <p>
-  <a href="https://hub.docker.com/repository/docker/cloudreactor/aws-setup-wizard">
-    <img src="https://img.shields.io/docker/cloud/build/cloudreactor/aws-setup-wizard?style=flat-square"
-     alt="Docker Build Status" >
-  </a>
   <img alt="GitHub Workflow Status"
    src="https://img.shields.io/github/workflow/status/CloudReactor/cloudreactor-aws-setup-wizard/CI">
   <img
@@ -12,7 +8,8 @@
    alt="License">
 </p>
 
-A command-line wizard to setup customer environments for running tasks managed by CloudReactor
+A command-line wizard to setup customer environments for running tasks,
+optionally managed by CloudReactor
 
 ## What this can do (pick and choose any or all):
 
@@ -55,7 +52,7 @@ In a terminal window, navigate to the repo. Then:
 
 Or with pipx:
 
-    pipx cloudreactor_aws_setup_wizard
+    pipx run cloudreactor_aws_setup_wizard
 
 ## Permissions required / granting access
 
