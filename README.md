@@ -1,11 +1,18 @@
 # cloudreactor-aws-setup-wizard
 
 <p>
-  <img alt="GitHub Workflow Status"
-   src="https://img.shields.io/github/workflow/status/CloudReactor/cloudreactor-aws-setup-wizard/CI">
+  <img alt="GitHub Workflow Status " src="https://img.shields.io/github/actions/workflow/status/CloudReactor/cloudreactor-aws-setup-wizard/push.yml">
+
+  <img alt="PyPI - Python Version" src="https://img.shields.io/pypi/pyversions/cloudreactor_aws_setup_wizard">
+
+  <img alt="PyPI" src="https://img.shields.io/pypi/v/cloudreactor_aws_setup_wizard">
+
+  <img alt="Docker Image Version (latest semver)" src="https://img.shields.io/docker/v/cloudreactor/aws-setup-wizard?label=Docker%20Image">
+
   <img
    src="https://img.shields.io/github/license/CloudReactor/cloudreactor-aws-setup-wizard.svg?style=flat-square"
    alt="License">
+
 </p>
 
 A command-line wizard to setup customer environments for running tasks,
@@ -41,6 +48,12 @@ Finally run the image:
 
 which will use the saved_state subdirectory of the current directory to
 save settings.
+
+You may use these alternative Docker images instead of `cloudreactor/aws-setup-wizard`
+to get around rate limits or bandwidth charges:
+
+* From AWS public ECR: `public.ecr.aws/x2w9p9b7/cloudreactor_aws_setup_wizard`
+* From GitHub packages: `ghcr.io/cloudreactor/cloudreactor-aws-setup-wizard`
 
 ### Without Docker (native execution)
 
@@ -96,12 +109,6 @@ launch the wizard. If you are using Docker to run the wizard:
 4) If run from an EC2 instance, the wizard should inherit permissions from
 the EC2 instance role (not tested yet)
 
-
-You may use these alternative Docker images instead of `cloudreactor/aws-setup-wizard`
-to get around rate limits or bandwidth charges:
-
-* From AWS public ECR: `public.ecr.aws/x2w9p9b7/cloudreactor_aws_setup_wizard`
-* From GitHub packages: `ghcr.io/cloudreactor/cloudreactor-aws-setup-wizard`
 
 ## Development
 
