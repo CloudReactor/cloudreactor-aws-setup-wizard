@@ -859,6 +859,30 @@ The access key and secret key are not sent to CloudReactor.
         else:
             self.cluster_arn = selection
 
+        descr = ecs_client.describe_clusters(clusters=[self.cluster_arn])
+        logging.debug(f"{descr=}")
+
+        cluster = (descr.get("clusters") or [{}])[0]
+        capacity_providers = cluster.get("capacityProviders", [])
+        default_capacity_provider_strategy = cluster.get("defaultCapacityProviderStrategy", [])
+        
+        if ("FARGATE" not in capacity_providers) or ("FARGATE_SPOT" not in capacity_providers):
+            rv = questionary.confirm(
+                f"ECS cluster '{self.cluster_arn}' does not have both FARGATE and FARGATE_SPOT as capacity providers. Do you want to add these capacity providers?"
+            ).ask()
+
+            if rv:
+                ecs_client.put_cluster_capacity_providers(
+                    cluster=self.cluster_arn,
+                    capacityProviders=["FARGATE", "FARGATE_SPOT"],
+                    defaultCapacityProviderStrategy=default_capacity_provider_strategy or [
+                        {"capacityProvider": "FARGATE", "weight": 1},
+                        {"capacityProvider": "FARGATE_SPOT", "weight": 0},
+                    ],
+                )
+
+                print(f"Successfully updated capacity providers for ECS cluster '{self.cluster_arn}'.\n")
+
         print(f"Using ECS cluster '{self.cluster_arn}'.\n")
         self.save()
         return self.cluster_arn
@@ -2384,14 +2408,16 @@ CloudReactor/{self.deployment_environment}/common/cloudreactor_api_key
     def make_cloudformation_role_template_url(self) -> str:
         host_qualifier = ""
         file_qualifier = ""
+        s3_region = "us-west-2"
         if self.cloudreactor_deployment_environment != "production":
             host_qualifier = "-" + self.cloudreactor_deployment_environment
             file_qualifier = "." + self.cloudreactor_deployment_environment
+            s3_region = "us-east-2"
 
         return (
             "https://cloudreactor-customer-setup"
             + host_qualifier
-            + ".s3-us-west-2.amazonaws.com/cloudreactor-aws-role-template-"
+            + f".s3.{s3_region}.amazonaws.com/cloudreactor-aws-role-template-"
             + str(self.role_template_major_version)
             + file_qualifier
             + ".json"
