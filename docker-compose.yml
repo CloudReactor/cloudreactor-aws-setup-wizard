@@ -1,5 +1,3 @@
-version: "3.7"
-
 x-service-base: &service-base
   image: aws-setup-wizard
   build:
