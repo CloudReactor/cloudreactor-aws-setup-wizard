@@ -1,12 +1,12 @@
 # Alpine base image can lead to long compilation times and errors.
 # https://pythonspeed.com/articles/base-image-python-docker-images/
-FROM python:3.11.3-slim-bullseye
+FROM public.ecr.aws/docker/library/python:3.12-slim
 
 LABEL maintainer="jeff@cloudreactor.io"
 
 WORKDIR /usr/app
 
-RUN pip install --no-input --no-cache-dir --upgrade pip==23.1.2
+RUN pip install --no-input --no-cache-dir --upgrade pip==26.1
 
 COPY requirements.txt .
 
@@ -16,16 +16,16 @@ RUN pip install --no-input --no-cache-dir -r requirements.txt
 
 # Output directly to the terminal to prevent logs from being lost
 # https://stackoverflow.com/questions/59812009/what-is-the-use-of-pythonunbuffered-in-docker-file
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONUNBUFFERED=1
 
 # Don't write *.pyc files
-ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONDONTWRITEBYTECODE=1
 
 # Enable the fault handler for segfaults
 # https://docs.python.org/3/library/faulthandler.html
-ENV PYTHONFAULTHANDLER 1
+ENV PYTHONFAULTHANDLER=1
 
-ENV PYTHONPATH /usr/app/src
+ENV PYTHONPATH=/usr/app/src
 
 RUN mkdir ./saved_state
 COPY wizard_config.yml ./
