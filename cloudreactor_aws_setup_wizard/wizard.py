@@ -1320,7 +1320,7 @@ You must set your AWS credentials before selecting or creating subnets.
             choices = ["Use previously entered subnets: " + subnets_str]
 
         choices += [
-            "Create a new VPC which includes subnets",
+            "Create a new VPC which includes subnets, or update a previously created VPC to modify its subnets",
             "Select existing subnet(s) which may have been created in an existing VPC set up by this wizard",
             # 'Enter subnets manually',
             "Skip subnets",
@@ -1349,7 +1349,7 @@ You must set your AWS credentials before selecting or creating subnets.
         rv = None
         ec2_client = None
         if is_create:
-            rv = self.create_vpc()
+            rv = self.create_or_update_vpc()
         elif is_select:
             ec2_client = self.make_boto_client("ec2")
             if not ec2_client:
@@ -1436,7 +1436,7 @@ You must set your AWS credentials before creating or selecting security groups.
         rv = None
         ec2_client = None
         if is_create:
-            rv = self.create_vpc()
+            rv = self.create_or_update_vpc()
         elif is_select:
             ec2_client = self.make_boto_client("ec2")
             if not ec2_client:
@@ -1511,10 +1511,10 @@ You must set your AWS credentials before creating or selecting security groups.
             if not rv:
                 return None
 
-        return self.create_vpc()
+        return self.create_or_update_vpc()
 
     # TODO: allow user to give the VPC a name
-    def create_vpc(self) -> Optional[str]:
+    def create_or_update_vpc(self) -> Optional[str]:
         print(
             """
 This wizard can create a VPC suitable for running ECS tasks, along with subnets and a security group.
@@ -1622,7 +1622,7 @@ Each NAT Gateway connects a private subnet to a public subnet, so ensure you
 create your private subnets that require NAT Gateways in the same Availability
 Zones as your public subnets.
 
-If you plan on deploying a web server to private subnets, ensure you create at
+If you plan on deploying a web server to private subnets, ensure you create
 subnets in at least 2 Availability Zones, so that you can use an
 Application Load Balancer.
 """
@@ -1688,13 +1688,13 @@ since they are free and may reduce bandwidth costs significantly.
                 print(
                     """
 Since none of your private subnets have a NAT gateway, your ECS Tasks running
-with Fargate require VPN interface endpoints for ECR DKR, ECR API, and
-CloudWatch logging, for a total cost of about $21.60 per month per private
-subnet.
+with Fargate in the private subnets require VPC interface endpoints for ECR DKR, ECR API, 
+and CloudWatch logging, for a total cost of about $21.60 per month per private
+subnet. However, if you only plan on running ECS Tasks in public subnets, you can skip 
+adding VPC endpoints to reduce costs, since public subnets have access to the public AWS endpoints.
+
     """
                 )
-
-                selected_vpc_endpoints = ["ECR_DKR", "ECR_API", "CloudWatch"]
             else:
                 print(
                     """
@@ -1705,31 +1705,31 @@ per month per private subnet.
     """
                 )
 
-                choices = [
-                    Choice(
-                        "ECR DKR -- reduces bandwidth costs of transferring Docker images, expecially when a Task is misconfigured",
-                        value="ECR_DKR",
-                        checked=True,
-                    ),
-                    Choice(
-                        "ECR API -- reduces bandwidth costs of performing API calls to ECR",
-                        value="ECR_API",
-                        checked=False,
-                    ),
-                    Choice(
-                        "CloudWatch -- reduces bandwith costs logging to CloudWatch",
-                        value="CloudWatch",
-                        checked=True,
-                    ),
-                ]
+            choices = [
+                Choice(
+                    "ECR DKR -- reduces bandwidth costs of transferring Docker images, expecially when a Task is misconfigured",
+                    value="ECR_DKR",
+                    checked=True,
+                ),
+                Choice(
+                    "ECR API -- reduces bandwidth costs of performing API calls to ECR",
+                    value="ECR_API",
+                    checked=False,
+                ),
+                Choice(
+                    "CloudWatch -- reduces bandwidth costs logging to CloudWatch",
+                    value="CloudWatch",
+                    checked=True,
+                ),
+            ]
 
-                selected_vpc_endpoints = questionary.checkbox(
-                    "Which VPC Endpoints do you want to setup?",
-                    choices=choices,
-                ).ask()
+            selected_vpc_endpoints = questionary.checkbox(
+                "Which VPC Endpoints do you want to setup?",
+                choices=choices,
+            ).ask()
 
-                if selected_vpc_endpoints is None:
-                    return None
+            if selected_vpc_endpoints is None:
+                return None
 
             selected_vpc_endpoints.append("S3")
             selected_vpc_endpoints.append("DynamoDB")
