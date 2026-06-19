@@ -314,7 +314,7 @@ Outputs:
       Name: !Sub '${AWS::StackName}-PrivateAZs'
   PrivateWithNatAZs:
     Description: 'Count of Availability Zones with Private Subnets and NAT Gateways'
-    Value: {{private_az_letters | length}}
+    Value: {{private_az_with_nat_letters | length}}
     Export:
       Name: !Sub '${AWS::StackName}-PrivateWithNatAZs'
 
